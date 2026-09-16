@@ -1,0 +1,21 @@
+{
+  "name": "mtga-tracker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Background companion app for MTG Arena: reads Player.log to capture match, draft and deck data. Milestone 1: headless raw-event logger.",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/cli.ts",
+    "start": "tsx src/cli.ts",
+    "build": "tsc -p tsconfig.json",
+    "test:parser": "tsx src/log/logParser.test.ts"
+  },
+  "dependencies": {
+    "chokidar": "^3.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
