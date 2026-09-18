@@ -1,39 +1,41 @@
-# MTGA Tracker — Milestone 1: headless log capture
+# MTGA Tracker — Milestone 2: typed events
 
 Background companion for MTG Arena. Long-term goal: track deck performance,
-per-event stats, and limited/draft data, with an in-game overlay. This first
-milestone deliberately does **not** draw an overlay yet — it just proves we
-can reliably capture MTGA's own event stream, and shows us exactly what
-that stream looks like on your real installation.
+per-event stats, and limited/draft data, with an in-game overlay.
 
-## Why start here
+Milestone 1 proved we could reliably capture MTGA's own event stream from
+`Player.log` without guessing its shape. Milestone 2 (this one) turns that
+generic capture into typed, queryable data — draft picks, deck lists, match
+results, live game state (life totals/turn) — based on shapes confirmed
+against a real draft + match, not guesses. There's still no overlay UI yet;
+this is the data layer it'll read from.
 
-MTG Arena has no public API. The established approach (used by 17Lands,
-MTGA Pro Tracker, and others) is to read `Player.log`, a file Arena writes
-locally when detailed logging is turned on. The exact JSON shape of that
-log has changed several times over the years, and we don't have a current,
-verified field-by-field map of it. Rather than guess and risk building on
-wrong assumptions, this milestone:
+## How it fits together
 
-1. Finds and tails your `Player.log` live, handling Arena restarts (which
-   rewrite the file) without losing events.
-2. Extracts every JSON payload the log contains, generically — no
-   assumptions about specific field names.
-3. Logs each one (with a best-effort event name, direction, and timestamp)
-   to `data/raw-events.jsonl`, and saves one sample of each *distinct*
-   event type to `samples/`.
+```
+Player.log  →  logTailer + logParser (generic JSON capture, milestone 1)
+                    │
+                    ├─→ data/raw-events.jsonl   (every event, untyped, for audit/debugging)
+                    │
+                    └─→ classifier.ts           (recognizes known shapes)
+                              │
+                              └─→ data/tracker.db   (typed events, SQLite)
+                                        │
+                                        └─→ npm run report  (human-readable summary)
+```
 
-Once you've played a few games/drafts with this running, we'll look at
-`samples/` together and write the real, typed parser (matches, games,
-draft picks, deck lists) against your actual log — grounded in data instead
-of guesses. That typed layer is milestone 2, and is when a proper local
-database replaces the raw JSONL file.
+The classifier (`src/domain/classifier.ts`) currently recognizes: joining a
+draft, seeing a pack, making a pick, completing a draft, submitting a deck,
+a match being found, live game state (life totals, turn, stage), and a
+match completing with its result. It does **not** yet parse turn-by-turn
+actions (spells cast, mana spent, the stack) — that's `clientToMatchServiceMessageType`
+and most `greToClientEvent` messages, intentionally left unclassified until
+there's a concrete reason (e.g. the overlay) to need them.
 
 ## Setup
 
-1. **Enable detailed logs in Arena** (one-time): in the Arena client, go to
-   *Options → Account* and turn on **"Detailed Logs (Plugin Support)"**.
-   Restart Arena once after enabling it.
+1. **Enable detailed logs in Arena** (one-time): *Options → Account* →
+   **"Detailed Logs (Plugin Support)"** → on. Restart Arena once after.
 2. Install dependencies:
    ```
    npm install
@@ -42,41 +44,70 @@ database replaces the raw JSONL file.
    ```
    npm start
    ```
-   It auto-detects the log path for your OS. To point at a specific file or
-   to replay the whole existing log instead of only new events, use:
+   To replay the whole existing log instead of only new events (e.g. the
+   first time, or if you started the tracker mid-session):
    ```
-   npm start -- --log-path "/path/to/Player.log" --from-start
+   npm start -- --from-start
+   ```
+4. See what's been captured:
+   ```
+   npm run report
    ```
 
-You'll see one line per captured event (its guessed name + direction), and
-a summary of event-type counts every 60 seconds and on exit (Ctrl+C).
+Re-running `npm start -- --from-start` more than once re-appends the whole
+replayed log to `data/raw-events.jsonl` (milestone-1's raw store doesn't
+de-dup) — that's fine, `npm run report` de-dupes by natural key (draft
+course ID, deck ID, match ID) so repeated data doesn't skew the summary.
 
-## What's next (milestone 2+)
+If you ever want to rebuild `data/tracker.db` from scratch (e.g. after a
+classifier change, without needing to replay the real log again), run:
+```
+npm run backfill
+```
 
-- Inspect `samples/` from a real play session and map the event types we
-  actually see to typed domain events (match start/end, game result, draft
-  pack/pick, deck submission).
-- Replace the raw JSONL store with a small local database (SQLite) keyed on
-  those typed events.
-- Build the always-on-top overlay window (Electron `BrowserWindow` with
-  transparency + click-through) that reads from that database live.
-- Layer in deck/collection tracking, per-archetype win rates, and draft
-  pick analysis on top.
+## Testing
+
+```
+npm test
+```
+Runs two fixture-based self-tests: the generic log-block extractor
+(`src/log/logParser.test.ts`) and the typed classifier
+(`src/domain/classifier.test.ts`, built from real captured shapes).
+
+## What's next (milestone 3+)
+
+- Turn-by-turn action parsing, if/when the overlay needs it (spells cast,
+  mana spent, combat).
+- Per-deck / per-archetype win-rate rollups once there's more than one
+  match of data.
+- The overlay itself: an always-on-top, click-through Electron
+  `BrowserWindow` positioned over the Arena window, reading live from the
+  classifier (or from `tracker.db`).
+- Handle the cases we haven't seen yet: bot drafts, Bo3 matches, losses,
+  draws, disconnects — the classifier's shapes are only confirmed for one
+  human draft + one Bo1 win so far.
 
 ## Project layout
 
 ```
 src/
   log/
-    logLocator.ts    finds Player.log for the current OS
-    logTailer.ts      tails the file live, handles Arena restarts/rotation
-    logParser.ts      generic streaming JSON-block extractor
-    logParser.test.ts self-test against a synthetic log fixture
+    logLocator.ts       finds Player.log for the current OS
+    logTailer.ts         tails the file live, handles Arena restarts/rotation
+    logParser.ts         generic streaming JSON-block extractor
+    logParser.test.ts    self-test against a synthetic log fixture
   db/
-    store.ts          appends events to data/raw-events.jsonl + samples/
-  cli.ts               headless entry point (this milestone's app)
-data/                  raw-events.jsonl lands here (gitignored)
-samples/                one sample JSON per distinct event type (gitignored)
+    store.ts             appends raw events to data/raw-events.jsonl + samples/
+    sqliteStore.ts        typed event-sourced store (data/tracker.db)
+  domain/
+    types.ts              typed domain event definitions
+    classifier.ts          raw block -> typed event(s)
+    classifier.test.ts      self-test against real captured shapes
+  cli.ts                 headless entry point: capture + classify, live
+  backfill.ts             rebuilds tracker.db from raw-events.jsonl
+  report.ts               human-readable summary from tracker.db
+data/                   raw-events.jsonl + tracker.db land here (gitignored)
+samples/                 one sample JSON per distinct raw event type (gitignored)
 ```
 
 ## A note on Wizards' policy

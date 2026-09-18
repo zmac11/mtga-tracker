@@ -4,6 +4,8 @@ import { locateLogFile } from "./log/logLocator.js";
 import { LogTailer } from "./log/logTailer.js";
 import { LogParser, type RawBlock } from "./log/logParser.js";
 import { RawEventStore } from "./db/store.js";
+import { TypedEventStore } from "./db/sqliteStore.js";
+import { Classifier } from "./domain/classifier.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -39,16 +41,33 @@ function main() {
 
   const dataDir = join(__dirname, "..", "data");
   const store = new RawEventStore(dataDir);
+  const typedStore = new TypedEventStore(join(dataDir, "tracker.db"));
+  const classifier = new Classifier();
   const parser = new LogParser();
   const tailer = new LogTailer(located.path, { fromStart });
 
   let eventCount = 0;
+  let typedCount = 0;
 
   parser.on("block", (block: RawBlock) => {
     eventCount++;
-    const key = store.append(block, new Date());
+    const receivedAt = new Date();
+    const key = store.append(block, receivedAt);
     const dirTag = block.direction === "request" ? "->" : block.direction === "response" ? "<-" : "  ";
-    console.log(`[${String(eventCount).padStart(5, "0")}] ${dirTag} ${key}`);
+
+    const domainEvents = classifier.classify({
+      direction: block.direction,
+      method: block.methodGuess,
+      json: block.json,
+      ts: block.timestampGuess ?? receivedAt.toISOString(),
+    });
+    if (domainEvents.length > 0) {
+      typedStore.appendMany(domainEvents);
+      typedCount += domainEvents.length;
+      for (const e of domainEvents) console.log(`[${String(eventCount).padStart(5, "0")}] ${dirTag} ${key}  =>  ${e.kind}`);
+    } else {
+      console.log(`[${String(eventCount).padStart(5, "0")}] ${dirTag} ${key}`);
+    }
   });
 
   tailer.on("data", (chunk) => parser.feed(chunk));
@@ -63,13 +82,14 @@ function main() {
       console.log("\n(no events captured yet)");
       return;
     }
-    console.log(`\n--- Event types seen so far (${eventCount} total) ---`);
+    console.log(`\n--- Event types seen so far (${eventCount} total, ${typedCount} classified) ---`);
     for (const { key, count } of summary.slice(0, 25)) {
       console.log(`  ${String(count).padStart(6, " ")}  ${key}`);
     }
     if (summary.length > 25) console.log(`  ... and ${summary.length - 25} more distinct types`);
     console.log(`Samples written to: ${join(dataDir, "..", "samples")}`);
     console.log(`Full raw log at:    ${join(dataDir, "raw-events.jsonl")}`);
+    console.log(`Typed events at:    ${join(dataDir, "tracker.db")} (run "npm run report" to see a summary)`);
   };
 
   const summaryInterval = setInterval(printSummary, 60_000);
@@ -79,6 +99,7 @@ function main() {
     console.log("\nStopping...");
     await tailer.stop();
     printSummary();
+    typedStore.close();
     process.exit(0);
   };
   process.on("SIGINT", shutdown);
