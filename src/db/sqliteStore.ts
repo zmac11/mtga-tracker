@@ -1,4 +1,4 @@
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 import type { DomainEvent } from "../domain/types.js";
 
 /**
@@ -9,14 +9,20 @@ import type { DomainEvent } from "../domain/types.js";
  * matches, losses, etc. would mean guessing again. Querying is done by
  * reading the relevant kind(s) back out and reducing in JS (see report.ts)
  * rather than SQL joins - fine at this data volume, and easy to evolve.
+ *
+ * Uses Node's built-in `node:sqlite` (stable/RC as of Node 22.5+ - no
+ * native compilation, so no native-module/Node-version compatibility
+ * issues, unlike better-sqlite3 which this replaced after its native addon
+ * failed to build against a newer Node/V8). Node will print an
+ * experimental-feature warning on some versions; that's expected.
  */
 export class TypedEventStore {
-  private db: Database.Database;
-  private insertStmt: Database.Statement;
+  private db: DatabaseSync;
+  private insertStmt: ReturnType<DatabaseSync["prepare"]>;
 
   constructor(dbPath: string) {
-    this.db = new Database(dbPath);
-    this.db.pragma("journal_mode = WAL");
+    this.db = new DatabaseSync(dbPath);
+    this.db.exec("PRAGMA journal_mode = WAL;");
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -34,17 +40,21 @@ export class TypedEventStore {
   }
 
   appendMany(events: DomainEvent[]): void {
-    const tx = this.db.transaction((evs: DomainEvent[]) => {
-      for (const e of evs) this.insertStmt.run(e.kind, e.ts, JSON.stringify(e));
-    });
-    tx(events);
+    this.db.exec("BEGIN");
+    try {
+      for (const e of events) this.insertStmt.run(e.kind, e.ts, JSON.stringify(e));
+      this.db.exec("COMMIT");
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
   }
 
   all<K extends DomainEvent["kind"]>(kind: K): Array<Extract<DomainEvent, { kind: K }>> {
     const rows = this.db.prepare("SELECT data FROM events WHERE kind = ? ORDER BY id ASC").all(kind) as Array<{
       data: string;
     }>;
-    return rows.map((r) => JSON.parse(r.data));
+    return rows.map((r) => JSON.parse(r.data as unknown as string));
   }
 
   count(): number {
