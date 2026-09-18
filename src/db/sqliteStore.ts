@@ -23,6 +23,12 @@ export class TypedEventStore {
   constructor(dbPath: string) {
     this.db = new DatabaseSync(dbPath);
     this.db.exec("PRAGMA journal_mode = WAL;");
+    // Without this, any brief lock contention (another process opening the
+    // same file - e.g. running `npm run report` while `npm start` is still
+    // live, or a cloud-sync tool like iCloud Drive briefly touching the
+    // file) throws SQLITE_BUSY immediately instead of waiting. 5s is plenty
+    // for our write volume (one small transaction per log event).
+    this.db.exec("PRAGMA busy_timeout = 5000;");
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
