@@ -60,23 +60,83 @@ function main() {
   const matchFounds = dedupeBy(store.all("MatchFound"), (m) => m.matchId);
   const matchCompletions = dedupeBy(store.all("MatchCompleted"), (m) => m.matchId);
 
-  console.log("\n=== Matches ===");
-  if (matchFounds.length === 0) {
-    console.log("(none captured yet)");
+  // One outcome record per match, computed once and reused below for both
+  // the per-match printout and the win-rate rollups - keeps "WIN"/"LOSS"
+  // logic in exactly one place.
+  interface MatchOutcome {
+    matchId: string;
+    eventId: string | null;
+    opponent: string;
+    outcome: "WIN" | "LOSS" | null; // null = in progress / result not captured
+    reason: string | null;
   }
-  for (const found of matchFounds) {
+
+  const matchOutcomes: MatchOutcome[] = matchFounds.map((found) => {
     const me = found.players.find((p) => p.playerName === myScreenName);
     const opponent = found.players.find((p) => p.playerName !== myScreenName);
     const completion = matchCompletions.find((m) => m.matchId === found.matchId);
     const matchResult = completion?.results.find((r) => r.scope === "MatchScope_Match");
 
-    let outcome = "in progress / result not captured";
+    let outcome: "WIN" | "LOSS" | null = null;
+    let reason: string | null = null;
     if (me && matchResult) {
       outcome = matchResult.winningTeamId === me.teamId ? "WIN" : "LOSS";
-      outcome += ` (${matchResult.reason.replace("ResultReason_", "")})`;
+      reason = matchResult.reason.replace("ResultReason_", "");
     }
 
-    console.log(`  - vs ${opponent?.playerName ?? "?"} [event: ${found.eventId ?? "?"}] -> ${outcome}`);
+    return { matchId: found.matchId, eventId: found.eventId, opponent: opponent?.playerName ?? "?", outcome, reason };
+  });
+
+  console.log("\n=== Matches ===");
+  if (matchOutcomes.length === 0) {
+    console.log("(none captured yet)");
+  }
+  for (const m of matchOutcomes) {
+    const label = m.outcome ? `${m.outcome} (${m.reason})` : "in progress / result not captured";
+    console.log(`  - vs ${m.opponent} [event: ${m.eventId ?? "?"}] -> ${label}`);
+  }
+
+  // --- Win rate rollups ---
+  // Only counts decided matches (outcome !== null). Rolled up by event
+  // (eventId/eventName - e.g. every ContenderDraft_HOB_20260824 match, across
+  // however many times that event's been run) and, within that, by the deck
+  // submitted for it.
+  //
+  // NOTE: eventName is currently the *only* reliable join between a match
+  // and a draft run/deck. MatchFound.players[].courseId looked promising for
+  // linking a match to the specific draft run, but it's confirmed to be a
+  // different ID space entirely (values like "Avatar_Basic_Gollum_HOB" -
+  // likely a cosmetic avatar id, not DraftCompleted's courseId GUID) - see
+  // the comment on MatchFound in types.ts. Practical effect: if you draft
+  // the *same* event type twice, matches from both runs will currently be
+  // lumped into one "by event" bucket, and "by deck" will show whichever
+  // deck was submitted most recently for that event name. Fine for now
+  // (one run per event so far); revisit if that turns out to matter.
+  const winRate = (outcomes: MatchOutcome[]) => {
+    const decided = outcomes.filter((o) => o.outcome !== null);
+    const wins = decided.filter((o) => o.outcome === "WIN").length;
+    const losses = decided.length - wins;
+    const pct = decided.length > 0 ? `${Math.round((wins / decided.length) * 100)}%` : "-";
+    return { wins, losses, total: decided.length, pct };
+  };
+
+  const byEvent = new Map<string, MatchOutcome[]>();
+  for (const o of matchOutcomes) {
+    const key = o.eventId ?? "(unknown event)";
+    const list = byEvent.get(key) ?? [];
+    list.push(o);
+    byEvent.set(key, list);
+  }
+
+  console.log("\n=== Win rate by event / deck ===");
+  if (byEvent.size === 0) {
+    console.log("(no matches captured yet)");
+  }
+  for (const [eventId, outcomes] of byEvent) {
+    const deck = decks.find((d) => d.eventName === eventId);
+    const label = deck ? `${eventId} - "${deck.deckName}"` : eventId;
+    const { wins, losses, total, pct } = winRate(outcomes);
+    console.log(`  - ${label}: ${wins}-${losses}` + (total > 0 ? ` (${pct} over ${total} decided match${total === 1 ? "" : "es"})` : " (no decided matches yet)"));
   }
 
   store.close();

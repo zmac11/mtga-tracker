@@ -58,6 +58,16 @@ export interface MatchFound {
     playerName: string;
     systemSeatId: number;
     teamId: number;
+    /**
+     * Raw field name from the log is genuinely "courseId", but verified
+     * (2026-09-18) that it is NOT the same ID space as DraftCompleted's
+     * courseId (that one's a GUID like "b468aa16-..."; this one looks like
+     * "Avatar_Basic_Gollum_HOB" - plausibly a cosmetic avatar/pet id, not a
+     * draft-run link). Do not use this to join a match back to a specific
+     * draft run/deck - there is currently no field that does that. The only
+     * confirmed reliable join across MatchFound/DraftCompleted/DeckSubmitted
+     * is the eventName/eventId string (e.g. "ContenderDraft_HOB_20260824").
+     */
     courseId: string | null;
   }>;
   ts: string;
