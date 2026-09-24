@@ -25,6 +25,18 @@ export interface ArenaCard {
   isRebalanced: boolean;
   /** If this card is the "base" version of a rebalanced Alchemy card, the rebalanced (A-) card's grpId. 0/absent otherwise. */
   rebalancedCardGrpId: number | null;
+  /**
+   * Decoded from Arena's own `Cards.Colors` column (a comma-separated list of
+   * small integers, joined against the `Enums` table's "Color" type to
+   * confirm the standard WUBRG mapping: 1=White, 2=Blue, 3=Black, 4=Red,
+   * 5=Green - verified 2026-09-24 against the real sample card database,
+   * including that basic lands correctly come back colorless). Always an
+   * array (empty for colorless cards/lands), sorted in WUBRG order, and
+   * available without any Scryfall enrichment - the primary/reliable color
+   * source for this project (see EnrichedCard.scryfallColors below for the
+   * Scryfall-sourced equivalent, kept only for reference/cross-checking).
+   */
+  colors: string[];
 }
 
 /** ArenaCard enriched with Scryfall data, joined on Scryfall's arena_id == Arena's grpId. */
@@ -32,7 +44,15 @@ export interface EnrichedCard extends ArenaCard {
   scryfallId: string | null;
   oracleText: string | null;
   manaCost: string | null;
-  colors: string[] | null;
+  /**
+   * Scryfall's own `colors` field - kept separate from ArenaCard.colors
+   * (renamed here to avoid the two colliding) since Scryfall enrichment is
+   * unconfirmed to actually run end-to-end on the user's machine (see the
+   * doc comment atop scryfallEnrich.ts), while Arena's own decoded colors
+   * are always available. Null whenever this card has no Scryfall match, or
+   * enrichment hasn't been run at all.
+   */
+  scryfallColors: string[] | null;
   /** Scryfall's own rarity string ("common", "uncommon", "rare", "mythic", "special", "bonus") - the trustworthy one, unlike rarityRaw above. */
   scryfallRarity: string | null;
   imageSmall: string | null;

@@ -86,20 +86,20 @@ function isScryfallCard(obj: unknown): obj is ScryfallCard {
 function extractCardFields(card: ScryfallCard): {
   oracleText: string | null;
   manaCost: string | null;
-  colors: string[] | null;
+  scryfallColors: string[] | null;
   images: ScryfallImageUris | null;
 } {
   if (card.oracle_text !== undefined || card.image_uris !== undefined) {
     return {
       oracleText: card.oracle_text ?? null,
       manaCost: card.mana_cost ?? null,
-      colors: card.colors ?? null,
+      scryfallColors: card.colors ?? null,
       images: card.image_uris ?? null,
     };
   }
   const front = card.card_faces?.[0];
   if (!front) {
-    return { oracleText: null, manaCost: null, colors: null, images: null };
+    return { oracleText: null, manaCost: null, scryfallColors: null, images: null };
   }
   // Combine both faces' oracle text (common convention: "front // back") -
   // useful for search/reference even though images below are front-only.
@@ -110,7 +110,7 @@ function extractCardFields(card: ScryfallCard): {
   return {
     oracleText: combinedText || null,
     manaCost: front.mana_cost ?? null,
-    colors: front.colors ?? null,
+    scryfallColors: front.colors ?? null,
     images: front.image_uris ?? null,
   };
 }
@@ -266,7 +266,7 @@ export async function enrichCards(arenaCards: ArenaCard[], options: EnrichOption
   const cards: EnrichedCard[] = arenaCards.map((arenaCard) => {
     const scryfallCard = matches.get(arenaCard.grpId);
     if (!scryfallCard) {
-      return { ...arenaCard, scryfallId: null, oracleText: null, manaCost: null, colors: null, scryfallRarity: null, imageSmall: null, imageNormal: null, imageLarge: null, imagePng: null, enrichedAt: null };
+      return { ...arenaCard, scryfallId: null, oracleText: null, manaCost: null, scryfallColors: null, scryfallRarity: null, imageSmall: null, imageNormal: null, imageLarge: null, imagePng: null, enrichedAt: null };
     }
     const fields = extractCardFields(scryfallCard);
     return {
@@ -274,7 +274,7 @@ export async function enrichCards(arenaCards: ArenaCard[], options: EnrichOption
       scryfallId: scryfallCard.id,
       oracleText: fields.oracleText,
       manaCost: fields.manaCost,
-      colors: fields.colors,
+      scryfallColors: fields.scryfallColors,
       scryfallRarity: scryfallCard.rarity ?? null,
       imageSmall: fields.images?.small ?? null,
       imageNormal: fields.images?.normal ?? null,

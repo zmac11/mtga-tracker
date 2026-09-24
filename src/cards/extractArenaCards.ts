@@ -31,6 +31,12 @@ import type { ArenaCard } from "./types.js";
  *   filtered out rather than stored with a null/empty name.
  * - Cards.Rarity is intentionally left undecoded (rariRaw) - see types.ts's
  *   comment on ArenaCard.rarityRaw for why.
+ * - Cards.Colors is a comma-separated list of small integers (e.g. "1",
+ *   "4,5", or "" for colorless) - decoded below via the confirmed mapping
+ *   from the Enums table (Type='Color'): 1=White, 2=Blue, 3=Black, 4=Red,
+ *   5=Green, the standard WUBRG convention. Verified 2026-09-24 against the
+ *   real sample database, including that basic lands (Forest/Plains/
+ *   Island/Swamp) correctly come back with an empty Colors string.
  */
 
 const NAME_QUERY = `
@@ -43,12 +49,29 @@ const NAME_QUERY = `
     c.IsToken          AS isToken,
     c.IsDigitalOnly    AS isDigitalOnly,
     c.IsRebalanced     AS isRebalanced,
-    c.RebalancedCardGrpId AS rebalancedCardGrpId
+    c.RebalancedCardGrpId AS rebalancedCardGrpId,
+    c.Colors           AS colorsRaw
   FROM Cards c
   LEFT JOIN Localizations_enUS l ON l.LocId = c.TitleId AND l.Formatted = 1
 `;
 
 const TAG_RE = /<[^>]+>/g;
+
+/** Arena's own Color enum ids, confirmed against the Enums table (Type='Color'). */
+const ARENA_COLOR_MAP: Record<string, string> = { "1": "W", "2": "U", "3": "B", "4": "R", "5": "G" };
+const WUBRG_ORDER = ["W", "U", "B", "R", "G"];
+
+/** Decodes Arena's comma-separated `Colors` string into sorted WUBRG letters. Empty/null -> colorless ([]). */
+export function decodeArenaColors(raw: string | null): string[] {
+  if (!raw) return [];
+  const letters = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0)
+    .map((id) => ARENA_COLOR_MAP[id])
+    .filter((letter): letter is string => Boolean(letter));
+  return WUBRG_ORDER.filter((letter) => letters.includes(letter));
+}
 
 interface RawRow {
   grpId: number;
@@ -60,6 +83,7 @@ interface RawRow {
   isDigitalOnly: number;
   isRebalanced: number;
   rebalancedCardGrpId: number;
+  colorsRaw: string | null;
 }
 
 /**
@@ -84,6 +108,7 @@ export function extractArenaCards(dbPath: string): ArenaCard[] {
         isDigitalOnly: Boolean(row.isDigitalOnly),
         isRebalanced: Boolean(row.isRebalanced),
         rebalancedCardGrpId: row.rebalancedCardGrpId ? row.rebalancedCardGrpId : null,
+        colors: decodeArenaColors(row.colorsRaw),
       });
     }
     return cards;

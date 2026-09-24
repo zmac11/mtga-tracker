@@ -5,6 +5,9 @@ import type { DraftPickMade } from "./domain/types.js";
 import { computeMatchOutcomes, rollupByEvent, rollupByEventDefinition, rollupBySubtype, rollupByFormat, winRate } from "./domain/rollups.js";
 import { buildEventRunHistory, listEventRuns } from "./domain/eventHistory.js";
 import { loadEventHistorySource } from "./eventHistoryLoader.js";
+import { deriveDeckColors } from "./domain/deckColors.js";
+import { rollupByColorCombo, type RunColorInfo } from "./domain/colorRollup.js";
+import { CardStore } from "./cards/cardStore.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -202,6 +205,48 @@ function main() {
     }
   }
 
+  // --- Win rate by color combination (milestone 7 phase 3) ---
+  // For every event *type* (rollupByEventDefinition - not per-run, so a
+  // repeated event's separate runs still combine), buckets each of its runs
+  // by the color combination of the deck submitted for that run, derived
+  // from Arena's own decoded card colors (see cards/extractArenaCards.ts and
+  // domain/deckColors.ts) - "how do I do on UR vs WB in HOB QuickDraft".
+  // Needs the `cards` table (from `npm run refresh-cards`) to know any
+  // card's colors; a run whose deck's cards aren't found there just shows as
+  // "(no deck captured)" rather than being skipped or crashing the report.
+  {
+    const cardColors = new Map<number, string[]>();
+    try {
+      const cardStore = new CardStore(dbPath);
+      for (const c of cardStore.all()) cardColors.set(c.grpId, c.colors);
+      cardStore.close();
+    } catch (err) {
+      console.error("\n(Could not load card colors from the cards table - run `npm run refresh-cards` first. Color-combination win rates will show as unknown.)");
+      console.error(`  ${err instanceof Error ? err.message : err}`);
+    }
+
+    const byEventRun = rollupByEvent(matchOutcomes);
+    const byDefinitionForColors = rollupByEventDefinition(matchOutcomes);
+
+    console.log("\n=== Win rate by color combination (within each event type) ===");
+    if (byDefinitionForColors.size === 0) {
+      console.log("(no matches captured yet)");
+    }
+    for (const [, { identity, runIds }] of byDefinitionForColors) {
+      const runInfos: RunColorInfo[] = runIds.map((runId) => {
+        const deck = decks.find((d) => d.eventName === runId);
+        const comboKey = deck ? deriveDeckColors(deck.mainDeck, cardColors).comboKey : "(no deck captured)";
+        return { eventId: runId, comboKey, outcomes: byEventRun.get(runId) ?? [] };
+      });
+      const byCombo = rollupByColorCombo(runInfos);
+      console.log(`  ${identity.definitionLabel}:`);
+      for (const [comboKey, bucket] of byCombo) {
+        const { wins, losses, total, pct } = bucket.winRate;
+        console.log(`    - ${comboKey}: ${wins}-${losses}` + (total > 0 ? ` (${pct} over ${total} decided match${total === 1 ? "" : "es"})` : " (no decided matches yet)"));
+      }
+    }
+  }
+
   // --- Per-run event history (milestone 7 phase 2) ---
   // `--event=<eventId>` prints one specific run's full history (deck,
   // sideboard, draft pick sequence, matches) - the same data the planned
@@ -221,6 +266,16 @@ function main() {
       if (history.deck) {
         const mainCount = history.deck.mainDeck.reduce((n, x) => n + x.quantity, 0);
         console.log(`Deck: "${history.deck.deckName}" (${mainCount} cards)`);
+        try {
+          const cardStore = new CardStore(dbPath);
+          const cardColors = new Map<number, string[]>();
+          for (const c of cardStore.all()) cardColors.set(c.grpId, c.colors);
+          cardStore.close();
+          const profile = deriveDeckColors(history.deck.mainDeck, cardColors);
+          console.log(`  Colors: ${profile.comboKey}`);
+        } catch {
+          // cards table not available - not fatal, just skip the colors line.
+        }
         console.log(`  Maindeck: ${history.deck.mainDeck.map((c) => `${c.quantity}x ${c.cardId}`).join(", ")}`);
         if (history.deck.sideboard) {
           const sideCount = history.deck.sideboard.reduce((n, x) => n + x.quantity, 0);

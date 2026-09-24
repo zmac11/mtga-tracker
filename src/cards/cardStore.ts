@@ -30,10 +30,11 @@ export class CardStore {
         isDigitalOnly INTEGER NOT NULL,
         isRebalanced INTEGER NOT NULL,
         rebalancedCardGrpId INTEGER,
+        colors TEXT,
         scryfallId TEXT,
         oracleText TEXT,
         manaCost TEXT,
-        colors TEXT,
+        scryfallColors TEXT,
         scryfallRarity TEXT,
         imageSmall TEXT,
         imageNormal TEXT,
@@ -44,11 +45,12 @@ export class CardStore {
       CREATE INDEX IF NOT EXISTS idx_cards_setCode ON cards(setCode);
       CREATE INDEX IF NOT EXISTS idx_cards_name ON cards(name);
     `);
+    this.migrateLegacyColorsColumn();
     this.upsertStmt = this.db.prepare(`
       INSERT INTO cards (
-        grpId, name, setCode, collectorNumber, rarityRaw, isToken, isDigitalOnly, isRebalanced, rebalancedCardGrpId,
-        scryfallId, oracleText, manaCost, colors, scryfallRarity, imageSmall, imageNormal, imageLarge, imagePng, enrichedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        grpId, name, setCode, collectorNumber, rarityRaw, isToken, isDigitalOnly, isRebalanced, rebalancedCardGrpId, colors,
+        scryfallId, oracleText, manaCost, scryfallColors, scryfallRarity, imageSmall, imageNormal, imageLarge, imagePng, enrichedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(grpId) DO UPDATE SET
         name = excluded.name,
         setCode = excluded.setCode,
@@ -58,10 +60,11 @@ export class CardStore {
         isDigitalOnly = excluded.isDigitalOnly,
         isRebalanced = excluded.isRebalanced,
         rebalancedCardGrpId = excluded.rebalancedCardGrpId,
+        colors = excluded.colors,
         scryfallId = excluded.scryfallId,
         oracleText = excluded.oracleText,
         manaCost = excluded.manaCost,
-        colors = excluded.colors,
+        scryfallColors = excluded.scryfallColors,
         scryfallRarity = excluded.scryfallRarity,
         imageSmall = excluded.imageSmall,
         imageNormal = excluded.imageNormal,
@@ -74,12 +77,14 @@ export class CardStore {
     // Arena-side extraction (e.g. after a new set drops, or via
     // `refresh-cards --skip-enrich`) never wipes out enrichment data from a
     // previous full run. New rows still get explicit NULLs for those
-    // columns since there's nothing to enrich with yet.
+    // columns since there's nothing to enrich with yet. `colors` (Arena's
+    // own, unlike the scryfall* columns) IS updated here - it comes from the
+    // same Arena-side extraction this statement is for.
     this.syncArenaStmt = this.db.prepare(`
       INSERT INTO cards (
-        grpId, name, setCode, collectorNumber, rarityRaw, isToken, isDigitalOnly, isRebalanced, rebalancedCardGrpId,
-        scryfallId, oracleText, manaCost, colors, scryfallRarity, imageSmall, imageNormal, imageLarge, imagePng, enrichedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)
+        grpId, name, setCode, collectorNumber, rarityRaw, isToken, isDigitalOnly, isRebalanced, rebalancedCardGrpId, colors,
+        scryfallId, oracleText, manaCost, scryfallColors, scryfallRarity, imageSmall, imageNormal, imageLarge, imagePng, enrichedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)
       ON CONFLICT(grpId) DO UPDATE SET
         name = excluded.name,
         setCode = excluded.setCode,
@@ -88,8 +93,26 @@ export class CardStore {
         isToken = excluded.isToken,
         isDigitalOnly = excluded.isDigitalOnly,
         isRebalanced = excluded.isRebalanced,
-        rebalancedCardGrpId = excluded.rebalancedCardGrpId
+        rebalancedCardGrpId = excluded.rebalancedCardGrpId,
+        colors = excluded.colors
     `);
+  }
+
+  /**
+   * Migrates a pre-2026-09-24 `cards` table: back then `colors` held
+   * Scryfall's colors (there was no Arena-derived color source yet). Rename
+   * it out of the way to `scryfallColors`, then add a fresh `colors` column
+   * for Arena's own decoded WUBRG colors (see extractArenaCards.ts) - filled
+   * in on the next syncArenaData()/upsert() run, not backfilled here. A
+   * brand-new table (created just above, in this same connection) already
+   * has both columns with their new meanings, so this is a no-op for it.
+   */
+  private migrateLegacyColorsColumn(): void {
+    const columns = (this.db.prepare("PRAGMA table_info(cards)").all() as Array<{ name: string }>).map((r) => r.name);
+    if (!columns.includes("scryfallColors")) {
+      this.db.exec("ALTER TABLE cards RENAME COLUMN colors TO scryfallColors;");
+      this.db.exec("ALTER TABLE cards ADD COLUMN colors TEXT;");
+    }
   }
 
   upsert(card: EnrichedCard): void {
@@ -103,10 +126,11 @@ export class CardStore {
       card.isDigitalOnly ? 1 : 0,
       card.isRebalanced ? 1 : 0,
       card.rebalancedCardGrpId,
+      JSON.stringify(card.colors),
       card.scryfallId,
       card.oracleText,
       card.manaCost,
-      card.colors ? JSON.stringify(card.colors) : null,
+      card.scryfallColors ? JSON.stringify(card.scryfallColors) : null,
       card.scryfallRarity,
       card.imageSmall,
       card.imageNormal,
@@ -150,6 +174,7 @@ export class CardStore {
           c.isDigitalOnly ? 1 : 0,
           c.isRebalanced ? 1 : 0,
           c.rebalancedCardGrpId,
+          JSON.stringify(c.colors),
         );
       }
       this.db.exec("COMMIT");
@@ -192,10 +217,11 @@ interface RawCardRow {
   isDigitalOnly: number;
   isRebalanced: number;
   rebalancedCardGrpId: number | null;
+  colors: string | null;
   scryfallId: string | null;
   oracleText: string | null;
   manaCost: string | null;
-  colors: string | null;
+  scryfallColors: string | null;
   scryfallRarity: string | null;
   imageSmall: string | null;
   imageNormal: string | null;
@@ -215,10 +241,11 @@ function rowToCard(row: RawCardRow): EnrichedCard {
     isDigitalOnly: Boolean(row.isDigitalOnly),
     isRebalanced: Boolean(row.isRebalanced),
     rebalancedCardGrpId: row.rebalancedCardGrpId,
+    colors: row.colors ? JSON.parse(row.colors) : [],
     scryfallId: row.scryfallId,
     oracleText: row.oracleText,
     manaCost: row.manaCost,
-    colors: row.colors ? JSON.parse(row.colors) : null,
+    scryfallColors: row.scryfallColors ? JSON.parse(row.scryfallColors) : null,
     scryfallRarity: row.scryfallRarity,
     imageSmall: row.imageSmall,
     imageNormal: row.imageNormal,
