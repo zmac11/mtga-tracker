@@ -118,3 +118,53 @@ export function rollupByEventDefinition(outcomes: MatchOutcome[]): Map<string, E
   }
   return byDefinition;
 }
+
+export interface GroupedRollup {
+  /** The grouping key itself - a subtype string (e.g. "QuickDraft") or a format string (e.g. "Draft"). */
+  key: string;
+  outcomes: MatchOutcome[];
+  /** Distinct eventIds (dated runs) contributing to this bucket, in first-seen order. */
+  runIds: string[];
+  /** Distinct event-type definitionKeys contributing to this bucket (e.g. both "QuickDraft_HOB" and "QuickDraft_XYZ" can both roll up under subtype "QuickDraft"). */
+  definitionKeys: string[];
+}
+
+function groupBy(outcomes: MatchOutcome[], keyOf: (identity: EventIdentity) => string): Map<string, GroupedRollup> {
+  const grouped = new Map<string, GroupedRollup>();
+  for (const o of outcomes) {
+    const eventId = o.eventId ?? "(unknown event)";
+    const identity = parseEventIdentity(eventId);
+    const key = keyOf(identity);
+    let bucket = grouped.get(key);
+    if (!bucket) {
+      bucket = { key, outcomes: [], runIds: [], definitionKeys: [] };
+      grouped.set(key, bucket);
+    }
+    bucket.outcomes.push(o);
+    if (!bucket.runIds.includes(eventId)) bucket.runIds.push(eventId);
+    if (!bucket.definitionKeys.includes(identity.definitionKey)) bucket.definitionKeys.push(identity.definitionKey);
+  }
+  return grouped;
+}
+
+/**
+ * Coarser than rollupByEventDefinition: groups by *subtype alone* (e.g.
+ * "QuickDraft"), combining across every set that subtype's ever been played
+ * on - so "how have I done at QuickDraft overall" isn't split up per set.
+ * Added 2026-09-24 as one of three "compaction" levels the user asked to be
+ * able to view event history at (this one, rollupByFormat below, and
+ * rollupByEventDefinition above - from most to least compacted, on top of
+ * the finest-grained rollupByEvent per exact run).
+ */
+export function rollupBySubtype(outcomes: MatchOutcome[]): Map<string, GroupedRollup> {
+  return groupBy(outcomes, (identity) => identity.subtype);
+}
+
+/**
+ * The most compacted grouping: by format alone (Draft / Sealed /
+ * Constructed / Other), combining every event of that format regardless of
+ * subtype or set - e.g. "how have I done across all limited drafts, ever."
+ */
+export function rollupByFormat(outcomes: MatchOutcome[]): Map<string, GroupedRollup> {
+  return groupBy(outcomes, (identity) => identity.format);
+}

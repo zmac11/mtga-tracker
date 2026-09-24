@@ -2,9 +2,39 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { TypedEventStore } from "./db/sqliteStore.js";
 import type { DraftPickMade } from "./domain/types.js";
-import { computeMatchOutcomes, rollupByEvent, rollupByEventDefinition, winRate } from "./domain/rollups.js";
+import { computeMatchOutcomes, rollupByEvent, rollupByEventDefinition, rollupBySubtype, rollupByFormat, winRate } from "./domain/rollups.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+type GroupByLevel = "run" | "definition" | "subtype" | "format" | "all";
+
+/**
+ * `--group-by=<level>` lets the user "compact" the win-rate view to whichever
+ * granularity they want to see - e.g. `--group-by=format` for "all my draft
+ * history combined", `--group-by=subtype` for "all QuickDraft, any set"
+ * (the user's "specific quick draft history" example), or the default `all`
+ * to just print every level (from most compacted down to per-run) since this
+ * is a quick CLI readout, not a UI with tabs - showing everything is cheap
+ * and the user can skim to whichever section they care about. `definition`
+ * (e.g. "QuickDraft - HOB" specifically, the user's "hobbit quick draft
+ * history" example) already existed before this flag; this just makes it
+ * one of several selectable levels instead of the only non-per-run option.
+ */
+function parseArgs(argv: string[]): { groupBy: GroupByLevel } {
+  let groupBy: GroupByLevel = "all";
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg.startsWith("--group-by=")) {
+      const value = arg.slice("--group-by=".length);
+      if (value === "run" || value === "definition" || value === "subtype" || value === "format" || value === "all") {
+        groupBy = value;
+      } else {
+        console.error(`Unknown --group-by value "${value}" - expected one of: run, definition, subtype, format, all. Falling back to "all".`);
+      }
+    }
+  }
+  return { groupBy };
+}
 
 /**
  * Prints a quick human-readable summary from data/tracker.db. Not the
@@ -12,6 +42,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
  * events add up to something useful (deck used, draft picks, win/loss).
  */
 function main() {
+  const { groupBy } = parseArgs(process.argv.slice(2));
   const dbPath = join(__dirname, "..", "data", "tracker.db");
   const store = new TypedEventStore(dbPath);
 
@@ -93,36 +124,77 @@ function main() {
   // *same event type* (e.g. HOB QuickDraft coming back after rotating out)
   // gets its own bucket here instead, by design - see the "by event type"
   // section right below for the aggregate across those.
-  const byEvent = rollupByEvent(matchOutcomes);
+  if (groupBy === "run" || groupBy === "all") {
+    const byEvent = rollupByEvent(matchOutcomes);
 
-  console.log("\n=== Win rate by event run / deck ===");
-  if (byEvent.size === 0) {
-    console.log("(no matches captured yet)");
-  }
-  for (const [eventId, outcomes] of byEvent) {
-    const deck = decks.find((d) => d.eventName === eventId);
-    const label = deck ? `${eventId} - "${deck.deckName}"` : eventId;
-    const { wins, losses, total, pct } = winRate(outcomes);
-    console.log(`  - ${label}: ${wins}-${losses}` + (total > 0 ? ` (${pct} over ${total} decided match${total === 1 ? "" : "es"})` : " (no decided matches yet)"));
+    console.log("\n=== Win rate by event run / deck ===");
+    if (byEvent.size === 0) {
+      console.log("(no matches captured yet)");
+    }
+    for (const [eventId, outcomes] of byEvent) {
+      const deck = decks.find((d) => d.eventName === eventId);
+      const label = deck ? `${eventId} - "${deck.deckName}"` : eventId;
+      const { wins, losses, total, pct } = winRate(outcomes);
+      console.log(`  - ${label}: ${wins}-${losses}` + (total > 0 ? ` (${pct} over ${total} decided match${total === 1 ? "" : "es"})` : " (no decided matches yet)"));
+    }
   }
 
   // Same win/loss data, grouped instead by *event type* (see
   // eventIdentity.ts) - so a repeated event (same format/set, later date)
   // adds to the same overall record instead of starting a fresh one every
-  // time it comes back around.
-  const byDefinition = rollupByEventDefinition(matchOutcomes);
+  // time it comes back around. This is the "hobbit quick draft history"
+  // compaction level from the user's request - one specific subtype+set.
+  if (groupBy === "definition" || groupBy === "all") {
+    const byDefinition = rollupByEventDefinition(matchOutcomes);
 
-  console.log("\n=== Win rate by event type (across all runs) ===");
-  if (byDefinition.size === 0) {
-    console.log("(no matches captured yet)");
+    console.log("\n=== Win rate by event type (across all runs of that exact type) ===");
+    if (byDefinition.size === 0) {
+      console.log("(no matches captured yet)");
+    }
+    for (const [, { identity, outcomes, runIds }] of byDefinition) {
+      const { wins, losses, total, pct } = winRate(outcomes);
+      const runNote = runIds.length > 1 ? ` (${runIds.length} runs)` : "";
+      console.log(
+        `  - [${identity.format}] ${identity.definitionLabel}${runNote}: ${wins}-${losses}` +
+          (total > 0 ? ` (${pct} over ${total} decided match${total === 1 ? "" : "es"})` : " (no decided matches yet)"),
+      );
+    }
   }
-  for (const [, { identity, outcomes, runIds }] of byDefinition) {
-    const { wins, losses, total, pct } = winRate(outcomes);
-    const runNote = runIds.length > 1 ? ` (${runIds.length} runs)` : "";
-    console.log(
-      `  - [${identity.format}] ${identity.definitionLabel}${runNote}: ${wins}-${losses}` +
-        (total > 0 ? ` (${pct} over ${total} decided match${total === 1 ? "" : "es"})` : " (no decided matches yet)"),
-    );
+
+  // Coarser still: every set combined for a given subtype (e.g. "QuickDraft"
+  // regardless of which set) - the user's "specific quick draft history"
+  // compaction level.
+  if (groupBy === "subtype" || groupBy === "all") {
+    const bySubtype = rollupBySubtype(matchOutcomes);
+
+    console.log("\n=== Win rate by subtype (every set combined) ===");
+    if (bySubtype.size === 0) {
+      console.log("(no matches captured yet)");
+    }
+    for (const [subtype, { outcomes, definitionKeys }] of bySubtype) {
+      const { wins, losses, total, pct } = winRate(outcomes);
+      const setNote = definitionKeys.length > 1 ? ` (${definitionKeys.length} sets)` : "";
+      console.log(`  - ${subtype}${setNote}: ${wins}-${losses}` + (total > 0 ? ` (${pct} over ${total} decided match${total === 1 ? "" : "es"})` : " (no decided matches yet)"));
+    }
+  }
+
+  // Most compacted: everything of one format combined (e.g. every Draft
+  // event, any subtype, any set) - the user's "all events in draft history"
+  // compaction level.
+  if (groupBy === "format" || groupBy === "all") {
+    const byFormat = rollupByFormat(matchOutcomes);
+
+    console.log("\n=== Win rate by format (most compacted) ===");
+    if (byFormat.size === 0) {
+      console.log("(no matches captured yet)");
+    }
+    for (const [format, { outcomes, definitionKeys }] of byFormat) {
+      const { wins, losses, total, pct } = winRate(outcomes);
+      console.log(
+        `  - ${format} (${definitionKeys.length} event type${definitionKeys.length === 1 ? "" : "s"}): ${wins}-${losses}` +
+          (total > 0 ? ` (${pct} over ${total} decided match${total === 1 ? "" : "es"})` : " (no decided matches yet)"),
+      );
+    }
   }
 
   store.close();
