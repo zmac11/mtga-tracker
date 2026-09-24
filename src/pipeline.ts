@@ -93,6 +93,24 @@ export class CapturePipeline extends EventEmitter {
     this.emit("processed", { block, key, domainEvents, index: this.eventCount });
   }
 
+  /**
+   * Past events already persisted in tracker.db from a previous run,
+   * for seeding a fresh LiveStateTracker's rollup history at startup (see
+   * LiveStateTracker.seedHistory) - so a relaunch doesn't lose track of an
+   * event's already-known record until something new happens to re-report
+   * it. Deliberately excludes GameStateSnapshot/PlayerIdentified (not
+   * needed for rollups) and doesn't attempt overall chronological ordering
+   * across kinds - seedHistory doesn't need it (see its own comment).
+   */
+  historyForSeeding(): DomainEvent[] {
+    return [
+      ...this.typedStore.all("MatchFound"),
+      ...this.typedStore.all("MatchCompleted"),
+      ...this.typedStore.all("DeckSubmitted"),
+      ...this.typedStore.all("CourseStanding"),
+    ];
+  }
+
   /** Only meaningful once `located.found` is true. */
   start(): void {
     this.tailer.start();

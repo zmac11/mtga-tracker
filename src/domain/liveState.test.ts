@@ -174,7 +174,60 @@ function run() {
   assert.equal(snap.eventRecord?.wins, 2);
   assert.equal(snap.eventRecord?.losses, 1);
 
-  console.log("OK: LiveStateTracker handled match found/game-state/completed, accumulating win rate per event without cross-contamination, and reconciled with Arena's own CourseStanding in both directions.");
+  // seedHistory() - rebuilding a *fresh* tracker (simulating an overlay
+  // relaunch) from events persisted by a previous run. The event record
+  // should be immediately correct, with no need for a new live match or
+  // CourseStanding to arrive first - this is the actual bug report:
+  // "it only corrects itself after finishing another match, not right away".
+  const fresh = new LiveStateTracker();
+  fresh.record({ kind: "PlayerIdentified", screenName: "Me", clientId: "c1", ts: "h0" });
+  fresh.seedHistory([
+    { kind: "DeckSubmitted", eventName: "Event5", deckId: "d5", deckName: "Seeded Deck", mainDeck: [], ts: "h0" },
+    {
+      kind: "MatchFound",
+      matchId: "m8",
+      eventId: "Event5",
+      players: [
+        { userId: "u1", playerName: "Me", systemSeatId: 1, teamId: 1, courseId: null },
+        { userId: "u9", playerName: "OppOld", systemSeatId: 2, teamId: 2, courseId: null },
+      ],
+      ts: "h1",
+    },
+    {
+      kind: "MatchCompleted",
+      matchId: "m8",
+      results: [{ scope: "MatchScope_Match", result: "ResultType_WinLoss", winningTeamId: 1, reason: "ResultReason_Game" }],
+      ts: "h2",
+    },
+    { kind: "CourseStanding", eventId: "Event5", courseId: "course-5", wins: 2, losses: 1, currentModule: "CreateMatch", deckName: "Seeded Deck", ts: "h3" },
+  ]);
+  // No live match yet this run - seedHistory must not make it look like one is in progress.
+  let freshSnap = fresh.snapshot();
+  assert.equal(freshSnap.match, null);
+  // But the event record is already correct: local rollup says 1-0 for
+  // Event5, the seeded CourseStanding says 2-1 - max() per side gives 2-1,
+  // immediately, before this fresh tracker has recorded a single live event.
+  assert.equal(freshSnap.eventRecord?.eventId, "Event5");
+  assert.equal(freshSnap.eventRecord?.wins, 2);
+  assert.equal(freshSnap.eventRecord?.losses, 1);
+  assert.equal(freshSnap.eventRecord?.deckName, "Seeded Deck");
+
+  // A live match starting this run should surface normally on top of the seeded history.
+  fresh.record({
+    kind: "MatchFound",
+    matchId: "m9",
+    eventId: "Event5",
+    players: [
+      { userId: "u1", playerName: "Me", systemSeatId: 1, teamId: 1, courseId: null },
+      { userId: "u10", playerName: "OppNew", systemSeatId: 2, teamId: 2, courseId: null },
+    ],
+    ts: "h4",
+  });
+  freshSnap = fresh.snapshot();
+  assert.equal(freshSnap.match?.matchId, "m9");
+  assert.equal(freshSnap.match?.opponent?.name, "OppNew");
+
+  console.log("OK: LiveStateTracker handled match found/game-state/completed, accumulating win rate per event without cross-contamination, reconciled with Arena's own CourseStanding in both directions, and seeded correct history at startup without faking a live match.");
 }
 
 run();

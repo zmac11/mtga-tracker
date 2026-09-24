@@ -177,6 +177,12 @@ app.whenReady().then(() => {
   const { logPath, fromStart } = parseArgs(process.argv.slice(2));
   const pipeline = new CapturePipeline({ logPath, fromStart });
   const liveState = new LiveStateTracker();
+  // Rebuild win-rate/event-record history from previous runs before we ever
+  // show anything - otherwise a relaunch shows every event's record as blank
+  // (or wrong) until something new happens to re-report it, even though the
+  // correct data was already sitting in tracker.db. See
+  // LiveStateTracker.seedHistory's comment for the bug this fixes.
+  liveState.seedHistory(pipeline.historyForSeeding());
 
   const sendSnapshot = () => {
     mainWindow?.webContents.send("state", {

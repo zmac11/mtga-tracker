@@ -96,6 +96,45 @@ export class LiveStateTracker {
     }
   }
 
+  /**
+   * Rebuilds win-rate/event-record history from events persisted in a
+   * *previous* run (see CapturePipeline.historyForSeeding()) - deliberately
+   * separate from record(), and deliberately skips MatchFound's
+   * currentMatchId/GameStateSnapshot's currentMatchId side effects, so a
+   * fresh overlay launch doesn't show a stale match HUD for a match that
+   * isn't happening anymore.
+   *
+   * Exists because without this, every overlay relaunch started every
+   * event's record from a blank slate (both the local rollup AND the
+   * CourseStanding backstop added in milestone 6 - the standing map is only
+   * ever populated by *live* events too), so a correct record already known
+   * from earlier in the session would silently regress to whatever the next
+   * live event happened to say - observed 2026-09-24 as "the record only
+   * corrects itself after finishing another match, not right away" after a
+   * relaunch: the previously-seen correct CourseStanding was sitting in
+   * tracker.db the whole time, just never read back in.
+   */
+  seedHistory(events: DomainEvent[]): void {
+    for (const event of events) {
+      switch (event.kind) {
+        case "MatchFound":
+          this.matchFounds.push(event);
+          break;
+        case "MatchCompleted":
+          this.matchCompletions.push(event);
+          break;
+        case "DeckSubmitted":
+          this.deckSubmissions.push(event);
+          break;
+        case "CourseStanding":
+          this.courseStandings.set(event.eventId, event);
+          break;
+        default:
+          break;
+      }
+    }
+  }
+
   snapshot(): OverlaySnapshot {
     const outcomes = computeMatchOutcomes(this.matchFounds, this.matchCompletions, this.myScreenName);
 
