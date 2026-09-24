@@ -134,7 +134,64 @@ function run() {
   assert.equal(state[0].kind, "GameStateSnapshot");
   assert.equal((state[0] as any).matchId, "m1");
 
-  console.log("OK: classifier handled draft pack/pick/complete, match found/completed, and game-state noise filtering.");
+  // Bot Draft (QuickDraft against bots) - a genuinely different single
+  // request/response pair for pack+pick, discovered 2026-09-24 from a real
+  // live QuickDraft_HOB_20260915 draft. Shapes below are copied verbatim
+  // from that real log (see classifier.ts's classifyBotDraftPick comment).
+  const c2 = new Classifier();
+  const botPickReq = c2.classify({
+    direction: "request",
+    method: "BotDraftDraftPick",
+    ts: "b1",
+    json: {
+      id: "71e91350-e0d7-4e63-8299-ae3c63d59b3e",
+      request: JSON.stringify({
+        EventName: "QuickDraft_HOB_20260915",
+        PickInfo: { EventName: "QuickDraft_HOB_20260915", CardIds: ["103509"], PackNumber: 0, PickNumber: 0 },
+      }),
+    },
+  });
+  assert.equal(botPickReq.length, 1);
+  assert.equal(botPickReq[0].kind, "DraftPickMade");
+  assert.equal((botPickReq[0] as any).draftId, "QuickDraft_HOB_20260915");
+  assert.equal((botPickReq[0] as any).pack, 1); // 0-indexed PackNumber normalized to match Arena's own "Pack 1, Pick 1" UI
+  assert.equal((botPickReq[0] as any).pick, 1);
+  assert.equal((botPickReq[0] as any).grpId, 103509);
+  assert.equal((botPickReq[0] as any).success, null);
+
+  const botPickResp = c2.classify({
+    direction: "response",
+    method: "BotDraftDraftPick",
+    ts: "b2",
+    json: {
+      CurrentModule: "BotDraft",
+      Payload: JSON.stringify({
+        Result: "Success",
+        EventName: "QuickDraft_HOB_20260915",
+        DraftStatus: "PickNext",
+        PackNumber: 0,
+        PickNumber: 1,
+        NumCardsToPick: 1,
+        DraftPack: ["103479", "103388", "103494", "103507", "103415"],
+        PackStyles: [],
+        PickedCards: ["103509"],
+        PickedStyles: [],
+      }),
+      DTO_InventoryInfo: {},
+    },
+  });
+  // One event confirming the pick that was made, one for the next pack it revealed.
+  assert.equal(botPickResp.length, 2);
+  const confirmedPick = botPickResp.find((e) => e.kind === "DraftPickMade") as any;
+  assert.equal(confirmedPick.grpId, 103509);
+  assert.equal(confirmedPick.success, true);
+  const nextPack = botPickResp.find((e) => e.kind === "DraftPackSeen") as any;
+  assert.equal(nextPack.draftId, "QuickDraft_HOB_20260915");
+  assert.equal(nextPack.pack, 1);
+  assert.equal(nextPack.pick, 2); // response's PickNumber (1) already points at the next pick
+  assert.deepEqual(nextPack.packCards, [103479, 103388, 103494, 103507, 103415]);
+
+  console.log("OK: classifier handled draft pack/pick/complete, match found/completed, game-state noise filtering, and Bot Draft's combined pick+next-pack response.");
 }
 
 run();

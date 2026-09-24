@@ -13,6 +13,14 @@ export interface DraftJoined {
 
 export interface DraftPackSeen {
   kind: "DraftPackSeen";
+  /**
+   * For a human/Traditional-style draft this is the real per-session
+   * draftId. Bot Draft (QuickDraft against bots - confirmed 2026-09-24)
+   * has no separate draft-session id in its own event payload at all, only
+   * an EventName (e.g. "QuickDraft_HOB_20260915") - so for those, this
+   * field holds the eventName instead. Treat it as "whatever id ties this
+   * draft run's picks together", not necessarily a GUID.
+   */
   draftId: string;
   pack: number;
   pick: number;
@@ -22,6 +30,7 @@ export interface DraftPackSeen {
 
 export interface DraftPickMade {
   kind: "DraftPickMade";
+  /** See DraftPackSeen.draftId's comment - same caveat applies here for Bot Draft. */
   draftId: string;
   pack: number;
   pick: number;

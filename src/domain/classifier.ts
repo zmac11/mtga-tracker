@@ -67,6 +67,7 @@ export class Classifier {
     this.classifyDraftJoin(ev, json, out);
     this.classifyDraftPack(ev, json, out);
     this.classifyDraftPick(ev, json, out);
+    this.classifyBotDraftPick(ev, json, out);
     this.classifyDraftComplete(ev, json, out);
     this.classifyDeckSubmitted(ev, json, out);
     this.classifyMatchRoomState(ev, json, out);
@@ -139,6 +140,82 @@ export class Classifier {
       const pending = this.pendingPicks.shift();
       if (pending) {
         out.push({ ...pending, success: json.IsPickSuccessful, ts: ev.ts });
+      }
+    }
+  }
+
+  /**
+   * Bot Draft (QuickDraft against bots - confirmed 2026-09-24, event
+   * "QuickDraft_HOB_20260915") uses a completely different single
+   * method for both viewing a pack and making a pick, unlike the
+   * Draft.Notify + EventPlayerDraftMakePick pair the human-draft path
+   * above handles. Real observed shapes:
+   *
+   *   ==> BotDraftDraftPick {"id":"...","request":"{\"EventName\":\"...\",
+   *     \"PickInfo\":{\"EventName\":\"...\",\"CardIds\":[\"103509\"],
+   *     \"PackNumber\":0,\"PickNumber\":0}}"}
+   *
+   *   <== BotDraftDraftPick(<id>)
+   *   {"CurrentModule":"BotDraft","Payload":"{\"Result\":\"Success\",
+   *     \"EventName\":\"...\",\"DraftStatus\":\"PickNext\",\"PackNumber\":0,
+   *     \"PickNumber\":1,\"NumCardsToPick\":1,
+   *     \"DraftPack\":[\"103479\",\"103388\",...],\"PackStyles\":[],
+   *     \"PickedCards\":[\"103509\"],\"PickedStyles\":[]}", ...}
+   *
+   * PackNumber/PickNumber are 0-indexed here (unlike the human-draft path's
+   * 1-indexed SelfPack/SelfPick/Pack/Pick) - normalized to 1-indexed below
+   * so reports read the same way regardless of draft type ("Pack 1, Pick 1"
+   * matches what Arena's own UI shows).
+   *
+   * There's no separate draft-session id anywhere in this payload, only an
+   * EventName - used as DraftPickMade/DraftPackSeen's draftId for these
+   * (see the comment on DraftPackSeen.draftId in types.ts).
+   *
+   * The response conveniently already contains the *next* pack's full
+   * contents (DraftPack) - unlike the human-draft path, which needs a
+   * separate Draft.Notify push for that - so one response here produces
+   * both the pick confirmation and the next DraftPackSeen.
+   */
+  private classifyBotDraftPick(ev: ClassifiableEvent, json: Record<string, unknown>, out: DomainEvent[]) {
+    if (ev.method !== "BotDraftDraftPick") return;
+
+    if (ev.direction === "request") {
+      const req = tryParseJSON(json.request);
+      const pickInfo = isObj(req) ? req.PickInfo : undefined;
+      if (!isObj(req) || typeof req.EventName !== "string" || !isObj(pickInfo) || !Array.isArray(pickInfo.CardIds)) return;
+      this.currentDraftId = req.EventName;
+      const pick: DraftPickMade = {
+        kind: "DraftPickMade",
+        draftId: req.EventName,
+        pack: Number(pickInfo.PackNumber ?? 0) + 1,
+        pick: Number(pickInfo.PickNumber ?? 0) + 1,
+        grpId: Number(pickInfo.CardIds[0]),
+        success: null,
+        ts: ev.ts,
+      };
+      this.pendingPicks.push(pick);
+      out.push(pick);
+      return;
+    }
+
+    if (ev.direction === "response") {
+      const payload = tryParseJSON(json.Payload);
+      if (!isObj(payload) || typeof payload.EventName !== "string") return;
+
+      const pending = this.pendingPicks.shift();
+      if (pending) {
+        out.push({ ...pending, success: payload.Result === "Success", ts: ev.ts });
+      }
+
+      if (Array.isArray(payload.DraftPack) && payload.DraftPack.length > 0) {
+        out.push({
+          kind: "DraftPackSeen",
+          draftId: payload.EventName,
+          pack: Number(payload.PackNumber ?? 0) + 1,
+          pick: Number(payload.PickNumber ?? 0) + 1,
+          packCards: payload.DraftPack.map(Number),
+          ts: ev.ts,
+        });
       }
     }
   }
