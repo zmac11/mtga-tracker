@@ -49,8 +49,8 @@ export interface DraftProgress {
   pick: number;
   /** The pack currently being offered (grpIds) - whatever the most recent DraftPackSeen for this draft said. */
   packCards: number[];
-  /** Every pick made so far this draft, in (pack, pick) order, deduped to the latest per (pack, pick) - same convention as eventHistory.ts. */
-  picks: Array<{ pack: number; pick: number; grpId: number }>;
+  /** Every pick made so far this draft, in (pack, pick) order, deduped to the latest per (pack, pick) - same convention as eventHistory.ts. `grpIds` is almost always one card, but see types.ts's comment on DraftPickMade.grpIds for "Pick Two" draft. */
+  picks: Array<{ pack: number; pick: number; grpIds: number[] }>;
 }
 
 export interface OverlaySnapshot {
@@ -301,7 +301,7 @@ export class LiveStateTracker {
       const picksForDraft = this.draftPicksMade.filter((p) => p.draftId === draftId);
       const picks = dedupeLatestByKey(picksForDraft, (p) => `${p.pack}|${p.pick}`)
         .sort((a, b) => a.pack - b.pack || a.pick - b.pick)
-        .map((p) => ({ pack: p.pack, pick: p.pick, grpId: p.grpId }));
+        .map((p) => ({ pack: p.pack, pick: p.pick, grpIds: p.grpIds }));
 
       if (latestPack) {
         currentDraft = { draftId, pack: latestPack.pack, pick: latestPack.pick, packCards: latestPack.packCards, picks };

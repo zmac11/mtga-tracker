@@ -65,7 +65,7 @@ function run() {
   assert.ok(!html.includes(">Draft<"));
 
   // Milestone 7 phase 6: a run WITH draft pick data renders the "Draft" tab -
-  // pack contents, which card was taken, and wheel/taken-by-others info.
+  // pack contents, which card(s) were taken, and wheel/taken-by-others info.
   const draftPicks: DraftViewerPick[] = [
     {
       pack: 1,
@@ -74,7 +74,7 @@ function run() {
         draftCard({ cardId: 1, name: "Bothersome Noisemaker", colors: ["R"] }),
         draftCard({ cardId: 6, name: "Some Other Card" }),
       ],
-      pickedCardId: 1,
+      pickedCardIds: [1],
       wheeledAt: { pack: 1, pick: 9 },
       takenByOthers: [draftCard({ cardId: 7, name: "Taken By Opponent" })],
     },
@@ -82,7 +82,7 @@ function run() {
       pack: 1,
       pick: 2,
       packCards: [draftCard({ cardId: 2, name: "Necromancy" })],
-      pickedCardId: 2,
+      pickedCardIds: [2],
       wheeledAt: null,
       takenByOthers: [],
     },
@@ -98,7 +98,28 @@ function run() {
   // The picked card gets the "picked" styling hook.
   assert.ok(/draft-card-row picked/.test(withDraft));
 
-  console.log("OK: generateDeckViewerHtml renders header/record/colors, maindeck+sideboard card rows (image or oracle-text hover fallback), curve buckets, the no-sideboard-captured message, escapes card names, hides the Draft tab with no draft data, and renders pack/pick/wheel info when draft data is present.");
+  // "Pick Two" draft (2 cards taken in one pick - see types.ts's
+  // DraftPickMade.grpIds comment): both taken cards get the "picked" hook,
+  // and the multi-card note renders.
+  const pickTwoPicks: DraftViewerPick[] = [
+    {
+      pack: 1,
+      pick: 1,
+      packCards: [
+        draftCard({ cardId: 1, name: "Card A" }),
+        draftCard({ cardId: 2, name: "Card B" }),
+        draftCard({ cardId: 3, name: "Card C" }),
+      ],
+      pickedCardIds: [1, 2],
+      wheeledAt: null,
+      takenByOthers: [],
+    },
+  ];
+  const withPickTwo = generateDeckViewerHtml({ ...data, draft: pickTwoPicks });
+  assert.equal((withPickTwo.match(/draft-card-row picked/g) ?? []).length, 2);
+  assert.ok(withPickTwo.includes("2 cards taken this pick"));
+
+  console.log("OK: generateDeckViewerHtml renders header/record/colors, maindeck+sideboard card rows (image or oracle-text hover fallback), curve buckets, the no-sideboard-captured message, escapes card names, hides the Draft tab with no draft data, renders pack/pick/wheel info when draft data is present, and highlights both cards of a multi-card 'Pick Two' pick.");
 }
 
 run();

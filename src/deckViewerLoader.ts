@@ -64,7 +64,7 @@ export function buildDeckViewerData(eventId: string, store: TypedEventStore, car
     pack: a.pack,
     pick: a.pick,
     packCards: a.packCards.map(toDraftCard),
-    pickedCardId: a.grpId,
+    pickedCardIds: a.grpIds,
     wheeledAt: a.wheel.wheeledAt,
     takenByOthers: a.wheel.takenByOthers.map(toDraftCard),
   }));

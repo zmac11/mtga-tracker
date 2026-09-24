@@ -23,12 +23,12 @@ function run() {
     ],
     picks: [
       // Out of order and with an unconfirmed/confirmed duplicate for the same (pack, pick) - dedup should keep the confirmed one and the final order should be sorted.
-      { kind: "DraftPickMade", draftId: "draft-1", pack: 1, pick: 2, grpId: 200, success: null, ts: "t2a" },
-      { kind: "DraftPickMade", draftId: "draft-1", pack: 1, pick: 1, grpId: 100, success: null, ts: "t2b" },
-      { kind: "DraftPickMade", draftId: "draft-1", pack: 1, pick: 1, grpId: 100, success: true, ts: "t2c" },
-      { kind: "DraftPickMade", draftId: "draft-1", pack: 1, pick: 2, grpId: 200, success: true, ts: "t2d" },
+      { kind: "DraftPickMade", draftId: "draft-1", pack: 1, pick: 2, grpIds: [200], success: null, ts: "t2a" },
+      { kind: "DraftPickMade", draftId: "draft-1", pack: 1, pick: 1, grpIds: [100], success: null, ts: "t2b" },
+      { kind: "DraftPickMade", draftId: "draft-1", pack: 1, pick: 1, grpIds: [100], success: true, ts: "t2c" },
+      { kind: "DraftPickMade", draftId: "draft-1", pack: 1, pick: 2, grpIds: [200], success: true, ts: "t2d" },
       // A pick under a DIFFERENT draftId - must not leak into this run's history.
-      { kind: "DraftPickMade", draftId: "unrelated-draft", pack: 1, pick: 1, grpId: 999, success: true, ts: "t2e" },
+      { kind: "DraftPickMade", draftId: "unrelated-draft", pack: 1, pick: 1, grpIds: [999], success: true, ts: "t2e" },
     ],
     packsSeen: [
       { kind: "DraftPackSeen", draftId: "draft-1", pack: 1, pick: 1, packCards: [100, 500, 600], ts: "t3" },

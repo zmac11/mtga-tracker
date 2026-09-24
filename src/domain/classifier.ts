@@ -114,19 +114,29 @@ export class Classifier {
     });
   }
 
+  /**
+   * `GrpIds` is a real confirmed field (2026-09-18 capture) and is already
+   * an array in the request body even for a normal 1-card pick - it just
+   * happens to have one element there. Kept as the full array (not
+   * truncated to `[0]`) so a "Pick Two" draft pick (2 cards taken in one
+   * pick action - see types.ts's comment on DraftPickMade.grpIds) is
+   * captured correctly rather than silently dropping the second card. This
+   * generalization hasn't been confirmed against a real Pick Two Draft log
+   * yet - only the 1-element case is confirmed real data.
+   */
   private classifyDraftPick(ev: ClassifiableEvent, json: Record<string, unknown>, out: DomainEvent[]) {
     if (ev.method !== "EventPlayerDraftMakePick") return;
 
     if (ev.direction === "request") {
       const req = tryParseJSON(json.request);
-      if (!isObj(req) || typeof req.DraftId !== "string" || !Array.isArray(req.GrpIds)) return;
+      if (!isObj(req) || typeof req.DraftId !== "string" || !Array.isArray(req.GrpIds) || req.GrpIds.length === 0) return;
       this.currentDraftId = req.DraftId;
       const pick: DraftPickMade = {
         kind: "DraftPickMade",
         draftId: req.DraftId,
         pack: Number(req.Pack),
         pick: Number(req.Pick),
-        grpId: Number(req.GrpIds[0]),
+        grpIds: req.GrpIds.map(Number),
         success: null,
         ts: ev.ts,
       };
@@ -176,6 +186,16 @@ export class Classifier {
    * contents (DraftPack) - unlike the human-draft path, which needs a
    * separate Draft.Notify push for that - so one response here produces
    * both the pick confirmation and the next DraftPackSeen.
+   *
+   * `CardIds` is already an array (confirmed real, one element for a
+   * normal pick) and the response even carries a `NumCardsToPick` field
+   * describing how many cards the *next* pick requires - both signs this
+   * same request shape is meant to support taking more than one card in
+   * one pick action (e.g. "Pick Two" draft's smaller pod, 2 cards per
+   * pick - see types.ts's comment on DraftPickMade.grpIds). Captured as the
+   * full array rather than truncated to `[0]`, same reasoning as the
+   * human-draft path above - not yet confirmed against a real Pick Two
+   * Draft log.
    */
   private classifyBotDraftPick(ev: ClassifiableEvent, json: Record<string, unknown>, out: DomainEvent[]) {
     if (ev.method !== "BotDraftDraftPick") return;
@@ -183,14 +203,14 @@ export class Classifier {
     if (ev.direction === "request") {
       const req = tryParseJSON(json.request);
       const pickInfo = isObj(req) ? req.PickInfo : undefined;
-      if (!isObj(req) || typeof req.EventName !== "string" || !isObj(pickInfo) || !Array.isArray(pickInfo.CardIds)) return;
+      if (!isObj(req) || typeof req.EventName !== "string" || !isObj(pickInfo) || !Array.isArray(pickInfo.CardIds) || pickInfo.CardIds.length === 0) return;
       this.currentDraftId = req.EventName;
       const pick: DraftPickMade = {
         kind: "DraftPickMade",
         draftId: req.EventName,
         pack: Number(pickInfo.PackNumber ?? 0) + 1,
         pick: Number(pickInfo.PickNumber ?? 0) + 1,
-        grpId: Number(pickInfo.CardIds[0]),
+        grpIds: pickInfo.CardIds.map(Number),
         success: null,
         ts: ev.ts,
       };

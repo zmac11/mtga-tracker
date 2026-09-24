@@ -34,7 +34,21 @@ export interface DraftPickMade {
   draftId: string;
   pack: number;
   pick: number;
-  grpId: number;
+  /**
+   * Every card taken at this one pick action - almost always a single
+   * element, but an array because Arena's own request/response shapes
+   * (`GrpIds`/`CardIds`, both confirmed real fields) are arrays even for a
+   * normal 1-card pick, and "Pick Two" draft (a real Arena format: a
+   * smaller pod, e.g. 4 players, where each pick takes 2 cards instead of
+   * 1) is expected to reuse the same shape with more entries - see
+   * classifier.ts's comment on classifyDraftPick/classifyBotDraftPick.
+   * **Not yet confirmed against a real captured Pick Two Draft log** (no
+   * such session has been captured as of this writing) - if a real one
+   * ever shows a different shape than "the same field, more entries",
+   * correct this the same way Bot Draft's real shape corrected an earlier
+   * guess (milestone 5).
+   */
+  grpIds: number[];
   success: boolean | null; // null if we only saw the request, not the response
   ts: string;
 }

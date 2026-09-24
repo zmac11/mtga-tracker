@@ -44,6 +44,17 @@ import type { DraftPackSeen, DraftPickMade } from "./types.js";
  * back with wheeledAt: null - the honest, correct answer, not a crash or a
  * wrong attribution. Confirm/revise this comment once real Bot Draft pack
  * data is captured.
+ *
+ * Also self-adapts to "Pick Two" draft (a smaller pod, e.g. 4 players, each
+ * pick taking 2 cards instead of 1 - see types.ts's comment on
+ * DraftPickMade.grpIds) with no changes needed here: the dominant-offset
+ * derivation is purely in terms of *pick numbers* (how many pick-slots
+ * apart a pack reappears), not how many cards are removed per pick or how
+ * many people are in the pod - a 4-person pod taking 2 cards each still
+ * just shows up as some dominant offset (4, in that case) the same way an
+ * 8-person 1-card pod shows up as offset 8. The one place multi-card picks
+ * DO need explicit handling is `takenByOthers` excluding every id in
+ * `made.grpIds`, not just a single `grpId` - see below.
  */
 
 export interface WheelInfo {
@@ -51,9 +62,10 @@ export interface WheelInfo {
   wheeledAt: { pack: number; pick: number } | null;
   /**
    * grpIds present in this pack the first time it was seen but gone by the
-   * wheel point, excluding whatever THIS player took at this very pick
-   * (that one's just "your pick", not "taken by someone else" - see
-   * `grpId` on DraftPickAttribution). Undifferentiated beyond that - which
+   * wheel point, excluding whatever THIS player took at this very pick -
+   * every card in it, not just one, so a multi-card "Pick Two" pick (see
+   * `grpIds` on DraftPickAttribution) doesn't misattribute the player's own
+   * second card to an opponent. Undifferentiated beyond that - which
    * specific opponent took which card isn't knowable from this data (see
    * the roadmap's own note on this). Empty array (not meaningful) when
    * wheeledAt is null.
@@ -64,9 +76,9 @@ export interface WheelInfo {
 export interface DraftPickAttribution {
   pack: number;
   pick: number;
-  /** The card this player took at this pick. */
-  grpId: number;
-  /** The full pack as first offered at this pick (includes `grpId` above - it hadn't been taken yet). */
+  /** Every card this player took at this pick (almost always one card - see types.ts's comment on DraftPickMade.grpIds for the "Pick Two" case). */
+  grpIds: number[];
+  /** The full pack as first offered at this pick (includes every id in `grpIds` above - none had been taken yet). */
   packCards: number[];
   wheel: WheelInfo;
 }
@@ -142,12 +154,13 @@ export function attributeDraftWheel(picks: DraftPickMade[], packsSeen: DraftPack
         if (match) {
           const later = group[match.j];
           const laterSet = new Set(later.packCards);
-          const takenByOthers = seen.packCards.filter((id) => !laterSet.has(id) && id !== made.grpId);
+          const ownIds = new Set(made.grpIds);
+          const takenByOthers = seen.packCards.filter((id) => !laterSet.has(id) && !ownIds.has(id));
           wheel = { wheeledAt: { pack: later.pack, pick: later.pick }, takenByOthers };
         }
       }
 
-      results.push({ pack: seen.pack, pick: seen.pick, grpId: made.grpId, packCards: seen.packCards, wheel });
+      results.push({ pack: seen.pack, pick: seen.pick, grpIds: made.grpIds, packCards: seen.packCards, wheel });
     }
   }
 

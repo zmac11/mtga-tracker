@@ -21,8 +21,8 @@ function run() {
       card({ cardId: 11, name: "Cinder Whelp", colors: ["R"], oracleText: "Flying." }),
     ],
     picks: [
-      { pack: 1, pick: 1, card: card({ cardId: 1, name: "Ashcoast Skirmisher", colors: ["R"] }) },
-      { pack: 1, pick: 2, card: card({ cardId: 2, name: "Quickstep", colors: ["U"] }) },
+      { pack: 1, pick: 1, cards: [card({ cardId: 1, name: "Ashcoast Skirmisher", colors: ["R"] })] },
+      { pack: 1, pick: 2, cards: [card({ cardId: 2, name: "Quickstep", colors: ["U"] })] },
     ],
   };
 
@@ -62,7 +62,25 @@ function run() {
   assert.ok(!withSpecialChars.includes("<script>alert(1)</script>"));
   assert.ok(withSpecialChars.includes("&lt;script&gt;"));
 
-  console.log("OK: generateDraftProgressHtml renders pack/pick progress, the current pack, picks-so-far newest-first with pack/pick labels, colors-so-far, auto-refresh, and escapes card names.");
+  // "Pick Two" draft (2 cards taken per pick - see types.ts's
+  // DraftPickMade.grpIds comment): both cards from one pick render, sharing
+  // the same pack/pick label, and count as 2 toward "picked so far".
+  const pickTwo = generateDraftProgressHtml({
+    ...data,
+    picks: [
+      {
+        pack: 1,
+        pick: 1,
+        cards: [card({ cardId: 1, name: "Card A", colors: ["R"] }), card({ cardId: 2, name: "Card B", colors: ["U"] })],
+      },
+    ],
+  });
+  assert.ok(pickTwo.includes("2 picked so far")); // one pick action, 2 cards - counts cards, not pick actions
+  assert.ok(pickTwo.includes("Card A"));
+  assert.ok(pickTwo.includes("Card B"));
+  assert.equal((pickTwo.match(/P1p1/g) ?? []).length, 2); // one row per card, same pack/pick label
+
+  console.log("OK: generateDraftProgressHtml renders pack/pick progress, the current pack, picks-so-far newest-first with pack/pick labels, colors-so-far, auto-refresh, escapes card names, and renders both cards of a multi-card 'Pick Two' pick.");
 }
 
 run();

@@ -39,7 +39,7 @@ function run() {
   assert.equal(pickResp.length, 1);
   assert.equal((pickResp[0] as any).success, true);
   assert.equal((pickResp[0] as any).draftId, "d1");
-  assert.equal((pickResp[0] as any).grpId, 100);
+  assert.deepEqual((pickResp[0] as any).grpIds, [100]);
 
   // Draft completion should pick up the draftId we tracked from the pick above.
   const complete = c.classify({
@@ -156,7 +156,7 @@ function run() {
   assert.equal((botPickReq[0] as any).draftId, "QuickDraft_HOB_20260915");
   assert.equal((botPickReq[0] as any).pack, 1); // 0-indexed PackNumber normalized to match Arena's own "Pack 1, Pick 1" UI
   assert.equal((botPickReq[0] as any).pick, 1);
-  assert.equal((botPickReq[0] as any).grpId, 103509);
+  assert.deepEqual((botPickReq[0] as any).grpIds, [103509]);
   assert.equal((botPickReq[0] as any).success, null);
 
   const botPickResp = c2.classify({
@@ -183,7 +183,7 @@ function run() {
   // One event confirming the pick that was made, one for the next pack it revealed.
   assert.equal(botPickResp.length, 2);
   const confirmedPick = botPickResp.find((e) => e.kind === "DraftPickMade") as any;
-  assert.equal(confirmedPick.grpId, 103509);
+  assert.deepEqual(confirmedPick.grpIds, [103509]);
   assert.equal(confirmedPick.success, true);
   const nextPack = botPickResp.find((e) => e.kind === "DraftPackSeen") as any;
   assert.equal(nextPack.draftId, "QuickDraft_HOB_20260915");
@@ -232,7 +232,51 @@ function run() {
   assert.equal(quickDraft.wins, 2);
   assert.equal(quickDraft.losses, 0); // defaulted from the omitted key, not left undefined
 
-  console.log("OK: classifier handled draft pack/pick/complete, match found/completed, game-state noise filtering, Bot Draft's combined pick+next-pack response, and EventGetCoursesV2 standings.");
+  // "Pick Two" draft (a real Arena format - a smaller pod, e.g. 4 players,
+  // where each pick takes 2 cards instead of 1) - NOT yet confirmed against
+  // a real captured log (no such session has been captured as of this
+  // writing), but GrpIds/CardIds are already confirmed-real arrays even for
+  // a normal 1-card pick above, so this extends that same confirmed field
+  // to more entries rather than guessing an unconfirmed new shape. Covers
+  // both draft paths so a real Pick Two log (whichever type it turns out to
+  // be) is already handled; revisit if a real one ever shows a different
+  // shape (e.g. two separate single-card requests instead of one 2-element
+  // one) the same way Bot Draft's real shape corrected an earlier guess.
+  const c4 = new Classifier();
+  const pickTwoReq = c4.classify({
+    direction: "request",
+    method: "EventPlayerDraftMakePick",
+    ts: "p1",
+    json: { id: "req2", request: JSON.stringify({ DraftId: "d2", GrpIds: [100, 200], Pack: 1, Pick: 1 }) },
+  });
+  assert.equal(pickTwoReq.length, 1);
+  assert.deepEqual((pickTwoReq[0] as any).grpIds, [100, 200]);
+
+  const pickTwoResp = c4.classify({
+    direction: "response",
+    method: "EventPlayerDraftMakePick",
+    ts: "p2",
+    json: { IsPickSuccessful: true },
+  });
+  assert.deepEqual((pickTwoResp[0] as any).grpIds, [100, 200]);
+  assert.equal((pickTwoResp[0] as any).success, true);
+
+  const c5 = new Classifier();
+  const botPickTwoReq = c5.classify({
+    direction: "request",
+    method: "BotDraftDraftPick",
+    ts: "p3",
+    json: {
+      id: "req3",
+      request: JSON.stringify({
+        EventName: "PickTwoDraft_HOB_20260924",
+        PickInfo: { EventName: "PickTwoDraft_HOB_20260924", CardIds: ["100", "200"], PackNumber: 0, PickNumber: 0 },
+      }),
+    },
+  });
+  assert.deepEqual((botPickTwoReq[0] as any).grpIds, [100, 200]);
+
+  console.log("OK: classifier handled draft pack/pick/complete, match found/completed, game-state noise filtering, Bot Draft's combined pick+next-pack response, EventGetCoursesV2 standings, and a synthetic 'Pick Two' (2 cards per pick) extension of both draft paths.");
 }
 
 run();

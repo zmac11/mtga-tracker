@@ -40,12 +40,13 @@ export interface DraftViewerPickCard {
 export interface DraftViewerPick {
   pack: number;
   pick: number;
-  /** The full pack as first offered at this pick, in original order (includes the picked card). */
+  /** The full pack as first offered at this pick, in original order (includes every id in pickedCardIds below). */
   packCards: DraftViewerPickCard[];
-  pickedCardId: number;
+  /** Every card taken at this pick - almost always one, but see types.ts's DraftPickMade.grpIds comment for "Pick Two" draft. */
+  pickedCardIds: number[];
   /** Where this same physical pack was next seen (wheeled back), or null - see draftWheel.ts's WheelInfo. */
   wheeledAt: { pack: number; pick: number } | null;
-  /** Cards gone from this pack by the wheel point, taken by other pod members (excludes this player's own pick) - empty/meaningless when wheeledAt is null. */
+  /** Cards gone from this pack by the wheel point, taken by other pod members (excludes every card this player took at this pick) - empty/meaningless when wheeledAt is null. */
   takenByOthers: DraftViewerPickCard[];
 }
 
@@ -148,11 +149,16 @@ function draftPickHtml(entry: DraftViewerPick): string {
         : ` &middot; nothing else was taken`)
     : `Did not wheel back`;
 
+  // Almost always one card taken per pick; a "Pick Two" pick (see types.ts's
+  // DraftPickMade.grpIds comment) takes 2, hence pickedCardIds being a set.
+  const pickedSet = new Set(entry.pickedCardIds);
+  const takenNote = entry.pickedCardIds.length === 1 ? "" : ` <span class="muted">(${entry.pickedCardIds.length} cards taken this pick)</span>`;
+
   return `
     <section class="draft-pick">
-      <h3>Pack ${entry.pack}, Pick ${entry.pick} <span class="muted">(${entry.packCards.length} card${entry.packCards.length === 1 ? "" : "s"})</span></h3>
+      <h3>Pack ${entry.pack}, Pick ${entry.pick}${takenNote} <span class="muted">(${entry.packCards.length} card${entry.packCards.length === 1 ? "" : "s"} offered)</span></h3>
       <ul class="card-list draft-card-list">
-        ${entry.packCards.map((c) => draftPickCardHtml(c, c.cardId === entry.pickedCardId)).join("")}
+        ${entry.packCards.map((c) => draftPickCardHtml(c, pickedSet.has(c.cardId))).join("")}
       </ul>
       <p class="muted wheel-line">${wheelLine}</p>
     </section>`;

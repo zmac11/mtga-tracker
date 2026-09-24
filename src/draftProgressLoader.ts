@@ -32,7 +32,7 @@ export function buildDraftProgressData(progress: DraftProgress, cardStore: CardS
   };
 
   const pickCounts = new Map<number, number>();
-  for (const p of progress.picks) pickCounts.set(p.grpId, (pickCounts.get(p.grpId) ?? 0) + 1);
+  for (const p of progress.picks) for (const grpId of p.grpIds) pickCounts.set(grpId, (pickCounts.get(grpId) ?? 0) + 1);
   const pseudoDeck = [...pickCounts.entries()].map(([cardId, quantity]) => ({ cardId, quantity }));
   const colorCombo = deriveDeckColors(pseudoDeck, cardColors).comboKey;
 
@@ -41,7 +41,9 @@ export function buildDraftProgressData(progress: DraftProgress, cardStore: CardS
     pack: progress.pack,
     pick: progress.pick,
     currentPack: progress.packCards.map(toCard),
-    picks: progress.picks.map((p) => ({ pack: p.pack, pick: p.pick, card: toCard(p.grpId) })),
+    // Almost always one card per pick - see types.ts's DraftPickMade.grpIds
+    // comment for "Pick Two" draft, where this is 2.
+    picks: progress.picks.map((p) => ({ pack: p.pack, pick: p.pick, cards: p.grpIds.map(toCard) })),
     colorCombo,
   };
 }

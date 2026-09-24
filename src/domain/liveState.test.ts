@@ -240,9 +240,9 @@ function run() {
   assert.deepEqual(snap.currentDraft?.packCards, [101, 102, 103]);
   assert.deepEqual(snap.currentDraft?.picks, []);
 
-  t.record({ kind: "DraftPickMade", draftId: "draftA", pack: 1, pick: 1, grpId: 101, success: true, ts: "d1" });
+  t.record({ kind: "DraftPickMade", draftId: "draftA", pack: 1, pick: 1, grpIds: [101], success: true, ts: "d1" });
   snap = t.snapshot();
-  assert.deepEqual(snap.currentDraft?.picks, [{ pack: 1, pick: 1, grpId: 101 }]);
+  assert.deepEqual(snap.currentDraft?.picks, [{ pack: 1, pick: 1, grpIds: [101] }]);
   assert.equal(snap.currentDraft?.pick, 1); // next pack hasn't arrived yet - pack/pick number still reflects the last-seen pack
 
   t.record({ kind: "DraftPackSeen", draftId: "draftA", pack: 1, pick: 2, packCards: [104, 105], ts: "d2" });
@@ -270,17 +270,17 @@ function run() {
   const freshDraft = new LiveStateTracker();
   freshDraft.seedHistory([
     { kind: "DraftPackSeen", draftId: "draftOld", pack: 1, pick: 1, packCards: [1, 2], ts: "s0" },
-    { kind: "DraftPickMade", draftId: "draftOld", pack: 1, pick: 1, grpId: 1, success: true, ts: "s1" },
+    { kind: "DraftPickMade", draftId: "draftOld", pack: 1, pick: 1, grpIds: [1], success: true, ts: "s1" },
     { kind: "DraftCompleted", eventName: "EventOld", courseId: "c-old", cardPool: [1], draftId: "draftOld", ts: "s2" },
     { kind: "DraftPackSeen", draftId: "draftNew", pack: 1, pick: 1, packCards: [10, 11], ts: "s3" },
-    { kind: "DraftPickMade", draftId: "draftNew", pack: 1, pick: 1, grpId: 10, success: true, ts: "s4" },
+    { kind: "DraftPickMade", draftId: "draftNew", pack: 1, pick: 1, grpIds: [10], success: true, ts: "s4" },
     { kind: "DraftPackSeen", draftId: "draftNew", pack: 1, pick: 2, packCards: [12, 13], ts: "s5" },
   ]);
   const draftSnap = freshDraft.snapshot();
   assert.equal(draftSnap.currentDraft?.draftId, "draftNew");
   assert.equal(draftSnap.currentDraft?.pack, 1);
   assert.equal(draftSnap.currentDraft?.pick, 2);
-  assert.deepEqual(draftSnap.currentDraft?.picks, [{ pack: 1, pick: 1, grpId: 10 }]);
+  assert.deepEqual(draftSnap.currentDraft?.picks, [{ pack: 1, pick: 1, grpIds: [10] }]);
 
   // seedHistory with ONLY a completed draft (no later activity at all) - must not resume as live.
   const freshCompletedDraft = new LiveStateTracker();
@@ -290,8 +290,17 @@ function run() {
   ]);
   assert.equal(freshCompletedDraft.snapshot().currentDraft, null);
 
+  // "Pick Two" draft (2 cards per pick action - see types.ts's
+  // DraftPickMade.grpIds comment) - the picks array should carry every
+  // card taken at a pick, not just the first.
+  const pickTwoDraft = new LiveStateTracker();
+  pickTwoDraft.record({ kind: "DraftPackSeen", draftId: "draftP2", pack: 1, pick: 1, packCards: [1, 2, 3, 4], ts: "p0" });
+  pickTwoDraft.record({ kind: "DraftPickMade", draftId: "draftP2", pack: 1, pick: 1, grpIds: [1, 2], success: true, ts: "p1" });
+  const pickTwoSnap = pickTwoDraft.snapshot();
+  assert.deepEqual(pickTwoSnap.currentDraft?.picks, [{ pack: 1, pick: 1, grpIds: [1, 2] }]);
+
   console.log(
-    "OK: LiveStateTracker handled match found/game-state/completed, accumulating win rate per event without cross-contamination, reconciled with Arena's own CourseStanding in both directions, seeded correct history at startup without faking a live match, and tracked/resumed live draft progress correctly.",
+    "OK: LiveStateTracker handled match found/game-state/completed, accumulating win rate per event without cross-contamination, reconciled with Arena's own CourseStanding in both directions, seeded correct history at startup without faking a live match, tracked/resumed live draft progress correctly, and carries every card from a multi-card 'Pick Two' pick.",
   );
 }
 

@@ -71,7 +71,11 @@ function render({ foundLog, watchingPath, snapshot }) {
   if (currentDraft) {
     els.draftProgress.classList.remove("hidden");
     els.draftPackPick.textContent = `Pack ${currentDraft.pack}, Pick ${currentDraft.pick}`;
-    els.draftPicked.textContent = `${currentDraft.picks.length} picked`;
+    // Cards taken, not pick actions - the same number for a normal 1-card
+    // draft, but a "Pick Two" pick (2 cards per pick action) should count
+    // as 2 here, not 1.
+    const cardsTaken = currentDraft.picks.reduce((n, p) => n + p.grpIds.length, 0);
+    els.draftPicked.textContent = `${cardsTaken} picked`;
   } else {
     els.draftProgress.classList.add("hidden");
   }

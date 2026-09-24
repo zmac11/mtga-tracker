@@ -60,7 +60,7 @@ function buildFixture(): { picks: DraftPickMade[]; packsSeen: DraftPackSeen[] } 
     draftId,
     pack: 1,
     pick: Number(pick),
-    grpId,
+    grpIds: [grpId],
     success: true,
     ts: "t",
   }));
@@ -109,7 +109,7 @@ function run() {
   // The very last pick (only 1 card, nothing later to compare against) - no crash, no wheel.
   const pick14 = attributed.find((a) => a.pick === 14)!;
   assert.equal(pick14.wheel.wheeledAt, null);
-  assert.equal(pick14.grpId, 103580);
+  assert.deepEqual(pick14.grpIds, [103580]);
 
   // A capture gap - a pack was seen but no matching pick was ever captured
   // (e.g. the log-rotation bug) - is skipped rather than guessing what was taken.
@@ -120,7 +120,40 @@ function run() {
   assert.equal(withGap.length, 13);
   assert.equal(withGap.some((a) => a.pick === 5), false);
 
-  console.log("OK: attributeDraftWheel correctly attributes the real 2026-09-18 ContenderDraft pack 1 wheel pattern (pod size 8, pick K wheels to pick K+8), including no-wheel cases near the end of the round and graceful handling of a capture gap.");
+  // "Pick Two" draft (2 cards taken per pick - see types.ts's
+  // DraftPickMade.grpIds comment) - a synthetic small pod (4 players, 2
+  // cards/pick, so a pack should wheel back 4 picks later) proves the
+  // dominant-offset algorithm generalizes without changes, AND that
+  // takenByOthers correctly excludes BOTH of the player's own cards, not
+  // just the first - the real bug this fix targets (before the fix, one of
+  // your own two cards would have been misattributed as "taken by someone
+  // else").
+  const p2DraftId = "pick-two-synthetic";
+  const p2PacksSeen: DraftPackSeen[] = [
+    { kind: "DraftPackSeen", draftId: p2DraftId, pack: 1, pick: 1, packCards: [1, 2, 3, 4, 5, 6, 7, 8], ts: "t" },
+    { kind: "DraftPackSeen", draftId: p2DraftId, pack: 1, pick: 2, packCards: [9, 10, 11, 12, 13, 14], ts: "t" },
+    { kind: "DraftPackSeen", draftId: p2DraftId, pack: 1, pick: 3, packCards: [15, 16, 17, 18], ts: "t" },
+    { kind: "DraftPackSeen", draftId: p2DraftId, pack: 1, pick: 4, packCards: [19, 20], ts: "t" },
+    // Pack from pick 1 wheels back at pick 5, now missing 6 of its 8 cards
+    // (this player's own 2 from pick 1, plus 2 each from the other 3 pod members).
+    { kind: "DraftPackSeen", draftId: p2DraftId, pack: 1, pick: 5, packCards: [3, 7], ts: "t" },
+  ];
+  const p2Picks: DraftPickMade[] = [
+    { kind: "DraftPickMade", draftId: p2DraftId, pack: 1, pick: 1, grpIds: [1, 2], success: true, ts: "t" },
+    { kind: "DraftPickMade", draftId: p2DraftId, pack: 1, pick: 2, grpIds: [9, 10], success: true, ts: "t" },
+    { kind: "DraftPickMade", draftId: p2DraftId, pack: 1, pick: 3, grpIds: [15, 16], success: true, ts: "t" },
+    { kind: "DraftPickMade", draftId: p2DraftId, pack: 1, pick: 4, grpIds: [19, 20], success: true, ts: "t" },
+    { kind: "DraftPickMade", draftId: p2DraftId, pack: 1, pick: 5, grpIds: [3, 7], success: true, ts: "t" },
+  ];
+  const p2Attributed = attributeDraftWheel(p2Picks, p2PacksSeen);
+  const p2Pick1 = p2Attributed.find((a) => a.pick === 1)!;
+  assert.deepEqual(p2Pick1.wheel.wheeledAt, { pack: 1, pick: 5 });
+  // Gone from the pack by pick 5: 1,2 (this player's own pick-1 cards - must
+  // NOT appear here) and 4,5,6,8 (taken by the other 3 pod members).
+  assert.deepEqual([...p2Pick1.wheel.takenByOthers].sort((a, b) => a - b), [4, 5, 6, 8]);
+  assert.ok(!p2Pick1.wheel.takenByOthers.includes(1) && !p2Pick1.wheel.takenByOthers.includes(2));
+
+  console.log("OK: attributeDraftWheel correctly attributes the real 2026-09-18 ContenderDraft pack 1 wheel pattern (pod size 8, pick K wheels to pick K+8), including no-wheel cases near the end of the round, graceful handling of a capture gap, and a synthetic 'Pick Two' (2 cards/pick, 4-player pod) case proving both cards of a multi-card pick are excluded from takenByOthers.");
 }
 
 run();

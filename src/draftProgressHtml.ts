@@ -35,7 +35,8 @@ export interface DraftProgressCard {
 export interface DraftProgressPick {
   pack: number;
   pick: number;
-  card: DraftProgressCard;
+  /** Almost always one card - see types.ts's DraftPickMade.grpIds comment for "Pick Two" draft (2 cards per pick), which this also renders correctly. */
+  cards: DraftProgressCard[];
 }
 
 export interface DraftProgressData {
@@ -60,13 +61,20 @@ function packCardHtml(card: DraftProgressCard): string {
 }
 
 function pickRowHtml(entry: DraftProgressPick): string {
-  return `
+  // Almost always one card; a "Pick Two" pick renders each card as its own
+  // row sharing the same pack/pick label, rather than cramming two names
+  // into one row.
+  return entry.cards
+    .map(
+      (card) => `
     <li class="pick-row" tabindex="0">
       <span class="pick-num">P${entry.pack}p${entry.pick}</span>
-      ${colorDotsHtml(entry.card.colors)}
-      <span class="name">${escapeHtml(entry.card.name)}</span>
-      <div class="preview">${cardPreviewInnerHtml(entry.card)}</div>
-    </li>`;
+      ${colorDotsHtml(card.colors)}
+      <span class="name">${escapeHtml(card.name)}</span>
+      <div class="preview">${cardPreviewInnerHtml(card)}</div>
+    </li>`,
+    )
+    .join("");
 }
 
 /**
@@ -104,6 +112,9 @@ export function generateDraftProgressHtml(data: DraftProgressData): string {
   // glance while the draft is still moving; the full ordered list is right
   // there either way.
   const picksNewestFirst = [...data.picks].reverse();
+  // Cards taken, not pick actions - the same thing for a normal 1-card
+  // draft, but a "Pick Two" pick should count as 2 here, not 1.
+  const cardsTaken = data.picks.reduce((n, p) => n + p.cards.length, 0);
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -133,7 +144,7 @@ export function generateDraftProgressHtml(data: DraftProgressData): string {
 <body>
   <div class="header">
     <h1>Draft in progress <span class="muted">(auto-refreshes every ${REFRESH_INTERVAL_SECONDS}s)</span></h1>
-    <div class="meta">Pack ${data.pack}, Pick ${data.pick} &middot; ${data.currentPack.length} card${data.currentPack.length === 1 ? "" : "s"} in this pack &middot; ${data.picks.length} picked so far</div>
+    <div class="meta">Pack ${data.pack}, Pick ${data.pick} &middot; ${data.currentPack.length} card${data.currentPack.length === 1 ? "" : "s"} in this pack &middot; ${cardsTaken} picked so far</div>
     <div class="meta">Colors so far: <strong>${escapeHtml(data.colorCombo)}</strong></div>
   </div>
 
