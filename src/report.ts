@@ -2,7 +2,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { TypedEventStore } from "./db/sqliteStore.js";
 import type { DraftPickMade } from "./domain/types.js";
-import { computeMatchOutcomes, rollupByEvent, winRate } from "./domain/rollups.js";
+import { computeMatchOutcomes, rollupByEvent, rollupByEventDefinition, winRate } from "./domain/rollups.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -76,9 +76,9 @@ function main() {
   }
 
   // --- Win rate rollups ---
-  // Only counts decided matches (outcome !== null). Rolled up by event
-  // (eventId/eventName - e.g. every ContenderDraft_HOB_20260824 match, across
-  // however many times that event's been run) and, within that, by the deck
+  // Only counts decided matches (outcome !== null). Rolled up by event RUN
+  // (eventId/eventName - e.g. every match under this exact dated
+  // "ContenderDraft_HOB_20260824" live window) and, within that, by the deck
   // submitted for it.
   //
   // NOTE: eventName is currently the *only* reliable join between a match
@@ -86,14 +86,16 @@ function main() {
   // linking a match to the specific draft run, but it's confirmed to be a
   // different ID space entirely (values like "Avatar_Basic_Gollum_HOB" -
   // likely a cosmetic avatar id, not DraftCompleted's courseId GUID) - see
-  // the comment on MatchFound in types.ts. Practical effect: if you draft
-  // the *same* event type twice, matches from both runs will currently be
-  // lumped into one "by event" bucket, and "by deck" will show whichever
-  // deck was submitted most recently for that event name. Fine for now
-  // (one run per event so far); revisit if that turns out to matter.
+  // the comment on MatchFound in types.ts. Practical effect: multiple runs
+  // *within* the same live window are correctly lumped into one "by event"
+  // bucket here (fine - "by deck" shows whichever deck was submitted most
+  // recently for that event name). A later, separately-dated run of the
+  // *same event type* (e.g. HOB QuickDraft coming back after rotating out)
+  // gets its own bucket here instead, by design - see the "by event type"
+  // section right below for the aggregate across those.
   const byEvent = rollupByEvent(matchOutcomes);
 
-  console.log("\n=== Win rate by event / deck ===");
+  console.log("\n=== Win rate by event run / deck ===");
   if (byEvent.size === 0) {
     console.log("(no matches captured yet)");
   }
@@ -102,6 +104,25 @@ function main() {
     const label = deck ? `${eventId} - "${deck.deckName}"` : eventId;
     const { wins, losses, total, pct } = winRate(outcomes);
     console.log(`  - ${label}: ${wins}-${losses}` + (total > 0 ? ` (${pct} over ${total} decided match${total === 1 ? "" : "es"})` : " (no decided matches yet)"));
+  }
+
+  // Same win/loss data, grouped instead by *event type* (see
+  // eventIdentity.ts) - so a repeated event (same format/set, later date)
+  // adds to the same overall record instead of starting a fresh one every
+  // time it comes back around.
+  const byDefinition = rollupByEventDefinition(matchOutcomes);
+
+  console.log("\n=== Win rate by event type (across all runs) ===");
+  if (byDefinition.size === 0) {
+    console.log("(no matches captured yet)");
+  }
+  for (const [, { identity, outcomes, runIds }] of byDefinition) {
+    const { wins, losses, total, pct } = winRate(outcomes);
+    const runNote = runIds.length > 1 ? ` (${runIds.length} runs)` : "";
+    console.log(
+      `  - [${identity.format}] ${identity.definitionLabel}${runNote}: ${wins}-${losses}` +
+        (total > 0 ? ` (${pct} over ${total} decided match${total === 1 ? "" : "es"})` : " (no decided matches yet)"),
+    );
   }
 
   store.close();

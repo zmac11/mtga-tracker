@@ -1,4 +1,5 @@
 import type { MatchCompleted, MatchFound } from "./types.js";
+import { parseEventIdentity, type EventIdentity } from "./eventIdentity.js";
 
 /**
  * Shared win/loss computation, used by both the headless report (report.ts)
@@ -66,10 +67,14 @@ export function winRateFromCounts(wins: number, losses: number): WinRate {
 }
 
 /**
- * Groups outcomes by event (eventId/eventName). This is currently the only
- * reliable join back to "which draft run/deck was this match for" - see the
- * courseId note on MatchFound in types.ts for why we don't group by a more
- * specific draft-run id yet.
+ * Groups outcomes by event (eventId/eventName) - i.e. by *run*: every match
+ * from one specific dated live-window of an event (e.g. one specific
+ * "QuickDraft_HOB_20260915"). This is currently the only reliable join back
+ * to "which draft run/deck was this match for" - see the courseId note on
+ * MatchFound in types.ts for why we don't group by a more specific
+ * draft-run id yet. See rollupByEventDefinition below for the coarser
+ * grouping that combines separate runs of the *same event type* together
+ * (e.g. every HOB QuickDraft, across however many times it's been live).
  */
 export function rollupByEvent(outcomes: MatchOutcome[]): Map<string, MatchOutcome[]> {
   const byEvent = new Map<string, MatchOutcome[]>();
@@ -80,4 +85,36 @@ export function rollupByEvent(outcomes: MatchOutcome[]): Map<string, MatchOutcom
     byEvent.set(key, list);
   }
   return byEvent;
+}
+
+export interface EventDefinitionRollup {
+  /** Representative identity for this bucket (definitionKey/format/subtype/setCode are what matter here - raw/dateStamp just reflect whichever run happened to be parsed first, not meaningful at this grouping level). */
+  identity: EventIdentity;
+  outcomes: MatchOutcome[];
+  /** Distinct eventIds (dated runs) contributing to this bucket, in first-seen order. */
+  runIds: string[];
+}
+
+/**
+ * Groups outcomes by *event type* (see eventIdentity.ts) rather than by
+ * exact eventId/run - so "how have I done at HOB QuickDraft overall" adds up
+ * across every time that event's been live, not just the current dated run.
+ * Added 2026-09-24 per the user's request not to treat a repeated event
+ * (same format/set, later date) as a brand new unrelated event.
+ */
+export function rollupByEventDefinition(outcomes: MatchOutcome[]): Map<string, EventDefinitionRollup> {
+  const byDefinition = new Map<string, EventDefinitionRollup>();
+  for (const o of outcomes) {
+    const eventId = o.eventId ?? "(unknown event)";
+    const identity = parseEventIdentity(eventId);
+    const key = identity.definitionKey;
+    let bucket = byDefinition.get(key);
+    if (!bucket) {
+      bucket = { identity, outcomes: [], runIds: [] };
+      byDefinition.set(key, bucket);
+    }
+    bucket.outcomes.push(o);
+    if (!bucket.runIds.includes(eventId)) bucket.runIds.push(eventId);
+  }
+  return byDefinition;
 }
