@@ -12,10 +12,12 @@
     "test:parser": "tsx src/log/logParser.test.ts",
     "test:classifier": "tsx src/domain/classifier.test.ts",
     "test:livestate": "tsx src/domain/liveState.test.ts",
-    "test": "npm run test:parser && npm run test:classifier && npm run test:livestate",
+    "test:jsonstream": "tsx src/cards/jsonArrayStream.test.ts",
+    "test": "npm run test:parser && npm run test:classifier && npm run test:livestate && npm run test:jsonstream",
     "backfill": "tsx src/backfill.ts",
     "report": "tsx src/report.ts",
-    "overlay": "npm run build && electron ."
+    "overlay": "npm run build && electron .",
+    "refresh-cards": "tsx src/refreshCards.ts"
   },
   "dependencies": {
     "chokidar": "^3.6.0"
