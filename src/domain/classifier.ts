@@ -70,6 +70,7 @@ export class Classifier {
     this.classifyBotDraftPick(ev, json, out);
     this.classifyDraftComplete(ev, json, out);
     this.classifyDeckSubmitted(ev, json, out);
+    this.classifyCourseStandings(ev, json, out);
     this.classifyMatchRoomState(ev, json, out);
     this.classifyGreGameState(ev, json, out);
     this.classifyAuthenticate(ev, json, out);
@@ -249,6 +250,48 @@ export class Classifier {
       mainDeck: deck.MainDeck.map((c: any) => ({ cardId: Number(c.cardId), quantity: Number(c.quantity) })),
       ts: ev.ts,
     });
+  }
+
+  /**
+   * EventGetCoursesV2 response - Arena's own authoritative list of the
+   * player's active/recently-completed event runs ("courses"), each with
+   * its own CurrentWins/CurrentLosses. Confirmed 2026-09-24 from a real
+   * live log:
+   *
+   *   <== EventGetCoursesV2(<id>)
+   *   {"Courses":[{"CourseId":"...","InternalEventName":"QuickDraft_HOB_20260915",
+   *     "CurrentModule":"CreateMatch","CourseDeckSummary":{"Name":"Draft Deck",...},
+   *     "CourseDeck":{...},"CurrentWins":1,"CardPool":[...],...}, ...]}
+   *
+   * CurrentWins/CurrentLosses appear to be omitted entirely when 0 (observed
+   * directly: a course with 0 losses had no "CurrentLosses" key at all, not
+   * a 0 value) - defaulted to 0 here rather than treated as missing data.
+   *
+   * This exists specifically so the overlay's win/loss display doesn't
+   * depend entirely on us having personally captured every match for an
+   * event - see CourseStanding's comment in types.ts and
+   * LiveStateTracker.snapshot() for how it's used to correct/backstop the
+   * locally-observed count.
+   */
+  private classifyCourseStandings(ev: ClassifiableEvent, json: Record<string, unknown>, out: DomainEvent[]) {
+    if (ev.method !== "EventGetCoursesV2" || ev.direction !== "response") return;
+    if (!Array.isArray(json.Courses)) return;
+
+    for (const course of json.Courses) {
+      if (!isObj(course)) continue;
+      if (typeof course.InternalEventName !== "string" || typeof course.CourseId !== "string") continue;
+      const deckSummary = course.CourseDeckSummary;
+      out.push({
+        kind: "CourseStanding",
+        eventId: course.InternalEventName,
+        courseId: course.CourseId,
+        wins: Number(course.CurrentWins ?? 0),
+        losses: Number(course.CurrentLosses ?? 0),
+        currentModule: typeof course.CurrentModule === "string" ? course.CurrentModule : null,
+        deckName: isObj(deckSummary) && typeof deckSummary.Name === "string" ? deckSummary.Name : null,
+        ts: ev.ts,
+      });
+    }
   }
 
   private classifyMatchRoomState(ev: ClassifiableEvent, json: Record<string, unknown>, out: DomainEvent[]) {

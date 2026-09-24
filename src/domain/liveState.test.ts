@@ -115,7 +115,66 @@ function run() {
   assert.equal(snap.eventRecord?.eventId, "Event2");
   assert.equal(snap.eventRecord?.total, 0);
 
-  console.log("OK: LiveStateTracker handled match found/game-state/completed, accumulating win rate per event without cross-contamination.");
+  // CourseStanding (Arena's own authoritative EventGetCoursesV2 record)
+  // reporting MORE wins/losses than we've personally observed for a fresh
+  // event with zero local matches - the actual bug this exists for:
+  // capture missed some matches, but the overlay should still show the
+  // correct total rather than undercounting.
+  t.record({
+    kind: "CourseStanding",
+    eventId: "Event3",
+    courseId: "course-3",
+    wins: 3,
+    losses: 2,
+    currentModule: "CreateMatch",
+    deckName: "Arena's Deck Name",
+    ts: "t8",
+  });
+  t.record({
+    kind: "MatchFound",
+    matchId: "m4",
+    eventId: "Event3",
+    players: [
+      { userId: "u1", playerName: "Me", systemSeatId: 1, teamId: 1, courseId: null },
+      { userId: "u5", playerName: "Opp4", systemSeatId: 2, teamId: 2, courseId: null },
+    ],
+    ts: "t9",
+  });
+  snap = t.snapshot();
+  assert.equal(snap.eventRecord?.wins, 3); // we'd observed 0 decided matches locally for Event3
+  assert.equal(snap.eventRecord?.losses, 2);
+  assert.equal(snap.eventRecord?.pct, "60%");
+  assert.equal(snap.eventRecord?.deckName, "Arena's Deck Name"); // no local DeckSubmitted for Event3, falls back to the standing's name
+
+  // The reverse case: local capture has observed MORE than a stale
+  // CourseStanding (Arena hasn't refreshed it since - it seems to lag until
+  // the player returns to the home screen). The displayed record must not
+  // regress backward to the lower authoritative count.
+  t.record({ kind: "CourseStanding", eventId: "Event4", courseId: "course-4", wins: 1, losses: 0, currentModule: "CreateMatch", deckName: null, ts: "t10" });
+  for (const [matchId, winningTeamId] of [["m5", 1], ["m6", 1], ["m7", 2]] as const) {
+    t.record({
+      kind: "MatchFound",
+      matchId,
+      eventId: "Event4",
+      players: [
+        { userId: "u1", playerName: "Me", systemSeatId: 1, teamId: 1, courseId: null },
+        { userId: "u6", playerName: "Opp5", systemSeatId: 2, teamId: 2, courseId: null },
+      ],
+      ts: "t11",
+    });
+    t.record({
+      kind: "MatchCompleted",
+      matchId,
+      results: [{ scope: "MatchScope_Match", result: "ResultType_WinLoss", winningTeamId, reason: "ResultReason_Game" }],
+      ts: "t12",
+    });
+  }
+  // Locally: 2 wins (m5, m6), 1 loss (m7) - exceeds the stale 1-0 standing on both counts.
+  snap = t.snapshot();
+  assert.equal(snap.eventRecord?.wins, 2);
+  assert.equal(snap.eventRecord?.losses, 1);
+
+  console.log("OK: LiveStateTracker handled match found/game-state/completed, accumulating win rate per event without cross-contamination, and reconciled with Arena's own CourseStanding in both directions.");
 }
 
 run();

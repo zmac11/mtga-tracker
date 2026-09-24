@@ -49,6 +49,30 @@ export interface DraftCompleted {
   ts: string;
 }
 
+/**
+ * Arena's own authoritative win/loss record for one of the player's active
+ * or recently-completed event runs ("courses"), from EventGetCoursesV2 -
+ * confirmed 2026-09-24 (see classifier.ts's classifyCourseStandings
+ * comment for the real captured shape). This exists specifically so the
+ * overlay's event win-loss display doesn't depend entirely on us having
+ * personally observed every MatchFound/MatchCompleted for that event -
+ * Arena tracks this itself regardless of whether our own capture had any
+ * gaps (e.g. the 2026-09-24 log-rotation bug), so it's the more trustworthy
+ * source when available. See LiveStateTracker.snapshot().
+ */
+export interface CourseStanding {
+  kind: "CourseStanding";
+  /** InternalEventName - same string used as eventId/eventName everywhere else in this project. */
+  eventId: string;
+  courseId: string;
+  wins: number;
+  losses: number;
+  /** Arena's own status for this run, e.g. "CreateMatch", "Complete" - not decoded further, just passed through. */
+  currentModule: string | null;
+  deckName: string | null;
+  ts: string;
+}
+
 export interface DeckSubmitted {
   kind: "DeckSubmitted";
   eventName: string;
@@ -116,4 +140,5 @@ export type DomainEvent =
   | MatchFound
   | GameStateSnapshot
   | MatchCompleted
-  | PlayerIdentified;
+  | PlayerIdentified
+  | CourseStanding;

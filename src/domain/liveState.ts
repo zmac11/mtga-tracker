@@ -1,5 +1,5 @@
-import type { DeckSubmitted, DomainEvent, GameStateSnapshot, MatchCompleted, MatchFound } from "./types.js";
-import { computeMatchOutcomes, rollupByEvent, winRate, type WinRate } from "./rollups.js";
+import type { CourseStanding, DeckSubmitted, DomainEvent, GameStateSnapshot, MatchCompleted, MatchFound } from "./types.js";
+import { computeMatchOutcomes, rollupByEvent, winRate, winRateFromCounts, type WinRate } from "./rollups.js";
 
 export interface OverlayPlayer {
   name: string;
@@ -50,6 +50,16 @@ export class LiveStateTracker {
   private deckSubmissions: DeckSubmitted[] = [];
   private latestGameStateByMatch = new Map<string, GameStateSnapshot>();
   private currentMatchId: string | null = null;
+  /**
+   * Arena's own authoritative win/loss record per event (see CourseStanding
+   * in types.ts) - keyed by eventId. Preferred over the locally-computed
+   * rollup in snapshot() below, since it doesn't depend on us having
+   * personally captured every match (found 2026-09-24: the log-rotation bug
+   * cost us a whole match's worth of capture, and the overlay kept showing
+   * a stale local count even after the fix, because it had no way to know
+   * it was behind Arena's own bookkeeping).
+   */
+  private courseStandings = new Map<string, CourseStanding>();
 
   record(event: DomainEvent): void {
     switch (event.kind) {
@@ -71,6 +81,12 @@ export class LiveStateTracker {
           this.latestGameStateByMatch.set(event.matchId, event);
           this.currentMatchId = event.matchId;
         }
+        break;
+      case "CourseStanding":
+        // Always overwrite - each EventGetCoursesV2 response is a full
+        // current snapshot, not a delta, so the latest one for an event is
+        // simply correct, whatever we had cached before.
+        this.courseStandings.set(event.eventId, event);
         break;
       // Draft events (DraftJoined/DraftPackSeen/DraftPickMade/DraftCompleted)
       // aren't needed for the match HUD or event win-rate panel yet - the
@@ -120,8 +136,26 @@ export class LiveStateTracker {
     const eventId = match?.eventId ?? outcomes.at(-1)?.eventId ?? null;
     if (eventId) {
       const forEvent = rollupByEvent(outcomes).get(eventId) ?? [];
+      const localRate = winRate(forEvent);
+      const standing = this.courseStandings.get(eventId);
+      // Take the max of what we personally observed and what Arena's own
+      // EventGetCoursesV2 last reported, per side. Neither source alone is
+      // always current: our own count can undercount if capture ever missed
+      // matches (the reason this exists at all - see CourseStanding's
+      // comment), while Arena's snapshot can be a beat behind ours right
+      // after a match we just finished but haven't backed out of yet (Arena
+      // seems to refresh this mainly when returning to the home/deck
+      // screen, not the instant a match ends). Taking the max of each side
+      // means the displayed record only ever moves forward, from whichever
+      // source currently knows more.
+      const wins = Math.max(localRate.wins, standing?.wins ?? 0);
+      const losses = Math.max(localRate.losses, standing?.losses ?? 0);
       const deck = [...this.deckSubmissions].reverse().find((d) => d.eventName === eventId) ?? null;
-      eventRecord = { ...winRate(forEvent), eventId, deckName: deck?.deckName ?? null };
+      eventRecord = {
+        ...winRateFromCounts(wins, losses),
+        eventId,
+        deckName: deck?.deckName ?? standing?.deckName ?? null,
+      };
     }
 
     return { myScreenName: this.myScreenName, match, eventRecord };

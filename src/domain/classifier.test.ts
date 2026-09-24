@@ -191,7 +191,48 @@ function run() {
   assert.equal(nextPack.pick, 2); // response's PickNumber (1) already points at the next pick
   assert.deepEqual(nextPack.packCards, [103479, 103388, 103494, 103507, 103415]);
 
-  console.log("OK: classifier handled draft pack/pick/complete, match found/completed, game-state noise filtering, and Bot Draft's combined pick+next-pack response.");
+  // EventGetCoursesV2 - Arena's own authoritative per-event win/loss record.
+  // Shape copied from a real live log (2026-09-24), trimmed to the fields
+  // that matter; a course with 0 losses (the QuickDraft one, mid-run)
+  // genuinely omits "CurrentLosses" entirely rather than sending 0.
+  const c3 = new Classifier();
+  const standings = c3.classify({
+    direction: "response",
+    method: "EventGetCoursesV2",
+    ts: "s1",
+    json: {
+      Courses: [
+        {
+          CourseId: "53a6566f-543e-4eff-8ee0-b7dbd5b81deb",
+          InternalEventName: "Historic_Play",
+          CurrentModule: "Complete",
+          CourseDeckSummary: { DeckId: "d1", Name: "Some Deck" },
+          CourseDeck: { MainDeck: [] },
+          CurrentWins: 4,
+          CurrentLosses: 3,
+        },
+        {
+          CourseId: "50782680-58e3-44cb-9cba-11aef1e51b24",
+          InternalEventName: "QuickDraft_HOB_20260915",
+          CurrentModule: "CreateMatch",
+          CourseDeckSummary: { DeckId: "d2", Name: "Draft Deck" },
+          CourseDeck: { MainDeck: [] },
+          CurrentWins: 2,
+          // CurrentLosses omitted - real logs omit it entirely at 0, not send 0.
+        },
+      ],
+    },
+  });
+  assert.equal(standings.length, 2);
+  const historic = standings.find((e: any) => e.eventId === "Historic_Play") as any;
+  assert.equal(historic.wins, 4);
+  assert.equal(historic.losses, 3);
+  assert.equal(historic.deckName, "Some Deck");
+  const quickDraft = standings.find((e: any) => e.eventId === "QuickDraft_HOB_20260915") as any;
+  assert.equal(quickDraft.wins, 2);
+  assert.equal(quickDraft.losses, 0); // defaulted from the omitted key, not left undefined
+
+  console.log("OK: classifier handled draft pack/pick/complete, match found/completed, game-state noise filtering, Bot Draft's combined pick+next-pack response, and EventGetCoursesV2 standings.");
 }
 
 run();

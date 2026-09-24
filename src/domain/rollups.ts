@@ -52,6 +52,20 @@ export function winRate(outcomes: MatchOutcome[]): WinRate {
 }
 
 /**
+ * Same shape as winRate(), but built directly from a wins/losses count
+ * rather than derived from locally-observed MatchOutcomes. Used for
+ * CourseStanding (Arena's own authoritative per-event record, from
+ * EventGetCoursesV2 - see classifier.ts) - that source doesn't need
+ * counting from raw outcomes since Arena already did it, but the result
+ * should look and format identically either way.
+ */
+export function winRateFromCounts(wins: number, losses: number): WinRate {
+  const total = wins + losses;
+  const pct = total > 0 ? `${Math.round((wins / total) * 100)}%` : "-";
+  return { wins, losses, total, pct };
+}
+
+/**
  * Groups outcomes by event (eventId/eventName). This is currently the only
  * reliable join back to "which draft run/deck was this match for" - see the
  * courseId note on MatchFound in types.ts for why we don't group by a more
