@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>MTGA Tracker Overlay</title>
+    <link rel="stylesheet" href="overlay.css" />
+  </head>
+  <body>
+    <div id="drag-handle" class="drag-handle" title="Drag to move (Cmd/Ctrl+Shift+O to unlock)"></div>
+    <div id="panel" class="panel">
+      <div id="status" class="status">Starting...</div>
+
+      <div id="match" class="match hidden">
+        <div class="players">
+          <div class="player me">
+            <div class="name" id="me-name">You</div>
+            <div class="life" id="me-life">-</div>
+          </div>
+          <div class="vs">vs</div>
+          <div class="player opp">
+            <div class="name" id="opp-name">Opponent</div>
+            <div class="life" id="opp-life">-</div>
+          </div>
+        </div>
+        <div class="turn" id="turn-indicator"></div>
+        <div class="outcome hidden" id="outcome"></div>
+      </div>
+
+      <div id="event-record" class="event-record hidden">
+        <span class="event-name" id="event-name"></span>
+        <span class="event-wl" id="event-wl"></span>
+      </div>
+    </div>
+    <script src="overlay-renderer.js"></script>
+  </body>
+</html>

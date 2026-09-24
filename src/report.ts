@@ -2,6 +2,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { TypedEventStore } from "./db/sqliteStore.js";
 import type { DraftPickMade } from "./domain/types.js";
+import { computeMatchOutcomes, rollupByEvent, winRate } from "./domain/rollups.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -60,32 +61,10 @@ function main() {
   const matchFounds = dedupeBy(store.all("MatchFound"), (m) => m.matchId);
   const matchCompletions = dedupeBy(store.all("MatchCompleted"), (m) => m.matchId);
 
-  // One outcome record per match, computed once and reused below for both
-  // the per-match printout and the win-rate rollups - keeps "WIN"/"LOSS"
-  // logic in exactly one place.
-  interface MatchOutcome {
-    matchId: string;
-    eventId: string | null;
-    opponent: string;
-    outcome: "WIN" | "LOSS" | null; // null = in progress / result not captured
-    reason: string | null;
-  }
-
-  const matchOutcomes: MatchOutcome[] = matchFounds.map((found) => {
-    const me = found.players.find((p) => p.playerName === myScreenName);
-    const opponent = found.players.find((p) => p.playerName !== myScreenName);
-    const completion = matchCompletions.find((m) => m.matchId === found.matchId);
-    const matchResult = completion?.results.find((r) => r.scope === "MatchScope_Match");
-
-    let outcome: "WIN" | "LOSS" | null = null;
-    let reason: string | null = null;
-    if (me && matchResult) {
-      outcome = matchResult.winningTeamId === me.teamId ? "WIN" : "LOSS";
-      reason = matchResult.reason.replace("ResultReason_", "");
-    }
-
-    return { matchId: found.matchId, eventId: found.eventId, opponent: opponent?.playerName ?? "?", outcome, reason };
-  });
+  // One outcome record per match, computed once (via the shared rollups
+  // module - also used by the overlay's live state) and reused below for
+  // both the per-match printout and the win-rate rollups.
+  const matchOutcomes = computeMatchOutcomes(matchFounds, matchCompletions, myScreenName);
 
   console.log("\n=== Matches ===");
   if (matchOutcomes.length === 0) {
@@ -112,21 +91,7 @@ function main() {
   // lumped into one "by event" bucket, and "by deck" will show whichever
   // deck was submitted most recently for that event name. Fine for now
   // (one run per event so far); revisit if that turns out to matter.
-  const winRate = (outcomes: MatchOutcome[]) => {
-    const decided = outcomes.filter((o) => o.outcome !== null);
-    const wins = decided.filter((o) => o.outcome === "WIN").length;
-    const losses = decided.length - wins;
-    const pct = decided.length > 0 ? `${Math.round((wins / decided.length) * 100)}%` : "-";
-    return { wins, losses, total: decided.length, pct };
-  };
-
-  const byEvent = new Map<string, MatchOutcome[]>();
-  for (const o of matchOutcomes) {
-    const key = o.eventId ?? "(unknown event)";
-    const list = byEvent.get(key) ?? [];
-    list.push(o);
-    byEvent.set(key, list);
-  }
+  const byEvent = rollupByEvent(matchOutcomes);
 
   console.log("\n=== Win rate by event / deck ===");
   if (byEvent.size === 0) {
