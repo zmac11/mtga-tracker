@@ -15,9 +15,16 @@ body {
   user-select: none;
 }
 
-/* Click-through by default (main.ts calls setIgnoreMouseEvents). This drag
-   handle only becomes usable once the overlay is toggled interactive
-   (Cmd/Ctrl+Shift+O), at which point mouse events actually reach the page. */
+/* Click-through by default (main.ts calls setIgnoreMouseEvents), so none of
+   this matters until the overlay is toggled interactive (Cmd/Ctrl+Shift+O) -
+   only then does the window actually receive mouse events at all.
+   .drag-handle is a thin top strip kept for its tooltip/visual affordance,
+   but the whole .panel below it is ALSO a drag region (2026-09-24) - so once
+   unlocked, the overlay can be dragged by clicking anywhere on it, not just
+   that top strip. .event-record/.draft-progress opt back out of dragging
+   (no-drag, below) since they have their own click handlers to open the
+   deck viewer / draft-progress page - Electron drag regions always win over
+   click handlers otherwise, which would make those two rows undraggable-only. */
 .drag-handle {
   position: absolute;
   top: 0;
@@ -37,6 +44,7 @@ body {
   flex-direction: column;
   gap: 8px;
   border: 1px solid rgba(255, 255, 255, 0.08);
+  -webkit-app-region: drag;
 }
 
 body.interactive .panel {
@@ -126,6 +134,11 @@ body.interactive .panel {
   color: rgba(255, 255, 255, 0.75);
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   padding-top: 6px;
+  /* Opt out of the .panel-wide drag region above - these two rows are
+     clickable (open the deck viewer / draft-progress page), and a drag
+     region takes priority over click handlers in Electron, which would
+     otherwise make clicking them just start a window drag instead. */
+  -webkit-app-region: no-drag;
 }
 
 /* Only looks/acts clickable once unlocked (Cmd/Ctrl+Shift+O) - matches the
