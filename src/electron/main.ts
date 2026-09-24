@@ -22,13 +22,14 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
  * Player.log, tail it, parse it, classify it, store it" - this file's job
  * is just to turn the classified events into a small always-on-top window,
  * plus a menu-bar tray icon for settings (no dock icon, no menu bar window -
- * the tray is the only UI chrome this app has).
+ * the tray is the only UI chrome this app has, apart from the small
+ * Settings window described below).
  *
  * Window is click-through by default (so it never blocks clicks on Arena
  * underneath it); Cmd/Ctrl+Shift+O (or the tray menu) toggles that off
- * temporarily so you can drag it to a better spot by its top handle.
- * Position is remembered across runs in a small JSON file under Electron's
- * userData directory.
+ * temporarily so you can drag it to a better spot from anywhere on it (see
+ * overlay.css's drag-region comment). Position is remembered across runs in
+ * a small JSON file under Electron's userData directory.
  *
  * Milestone 8+ (2026-09-24): the tray menu also exposes "Refresh Card
  * Database" - a button version of `npm run refresh-cards` (see
@@ -40,6 +41,17 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
  * main process rather than shelling out to the CLI script, so it works the
  * same whether or not the user has Node/npm set up separately from the
  * packaged app.
+ *
+ * Milestone 9+ (2026-09-24): the user asked for a few overlay-size options
+ * plus a transparency slider "so anyone can set optimal settings for
+ * them". A continuous slider isn't something a native Tray context menu
+ * can host on any platform, so this is the one setting that finally
+ * justified a real (small, plain) Settings window - opened from the tray's
+ * "Overlay Settings..." item - rather than more tray-menu items. Size and
+ * opacity both persist to overlay-settings.json (same "small JSON file
+ * under userData" pattern as the remembered window position) and apply
+ * live to the running overlay the instant they change - see
+ * applyOverlaySettings() below.
  */
 
 function parseArgs(argv: string[]) {
@@ -50,9 +62,6 @@ function parseArgs(argv: string[]) {
   }
   return args;
 }
-
-const WINDOW_WIDTH = 300;
-const WINDOW_HEIGHT = 180;
 
 function positionConfigPath(): string {
   const dir = app.getPath("userData");
@@ -76,6 +85,65 @@ function savePosition(x: number, y: number): void {
     writeFileSync(positionConfigPath(), JSON.stringify({ x, y }), "utf8");
   } catch {
     // Best-effort - losing the remembered position isn't worth crashing over.
+  }
+}
+
+/**
+ * Milestone 9+: the overlay's selectable sizes. `scale` is applied as the
+ * renderer's root font-size (BASE_FONT_PX * scale) - overlay.css expresses
+ * every dimension in rem off that root size, so the whole UI (text, life
+ * totals, padding, everything) scales uniformly with it. `width`/`height`
+ * are the actual BrowserWindow size at that scale, always exactly
+ * BASE_WIDTH/BASE_HEIGHT * scale so the window frame matches the scaled
+ * content pixel-for-pixel with no clipping or extra empty space. "Medium"
+ * is the original (and still default) size from before this feature
+ * existed, so nobody sees any change unless they open Settings.
+ */
+const BASE_FONT_PX = 10;
+const BASE_WIDTH = 300;
+const BASE_HEIGHT = 180;
+
+const SIZE_PRESETS: Record<string, { label: string; scale: number; width: number; height: number }> = {
+  small: { label: "Small", scale: 0.8, width: Math.round(BASE_WIDTH * 0.8), height: Math.round(BASE_HEIGHT * 0.8) },
+  medium: { label: "Medium (default)", scale: 1, width: BASE_WIDTH, height: BASE_HEIGHT },
+  large: { label: "Large", scale: 1.25, width: Math.round(BASE_WIDTH * 1.25), height: Math.round(BASE_HEIGHT * 1.25) },
+  xlarge: { label: "Extra Large", scale: 1.5, width: Math.round(BASE_WIDTH * 1.5), height: Math.round(BASE_HEIGHT * 1.5) },
+};
+const DEFAULT_SIZE_PRESET = "medium";
+const DEFAULT_OPACITY = 0.72; // matches the panel's original hardcoded background alpha
+const MIN_OPACITY = 0.2;
+const MAX_OPACITY = 1;
+
+interface OverlaySettings {
+  sizePreset: string; // a key of SIZE_PRESETS
+  opacity: number; // MIN_OPACITY..MAX_OPACITY
+}
+
+function overlaySettingsPath(): string {
+  const dir = app.getPath("userData");
+  mkdirSync(dir, { recursive: true });
+  return join(dir, "overlay-settings.json");
+}
+
+function loadOverlaySettings(): OverlaySettings {
+  try {
+    const raw = readFileSync(overlaySettingsPath(), "utf8");
+    const parsed = JSON.parse(raw);
+    const sizePreset = typeof parsed.sizePreset === "string" && parsed.sizePreset in SIZE_PRESETS ? parsed.sizePreset : DEFAULT_SIZE_PRESET;
+    const opacity =
+      typeof parsed.opacity === "number" && parsed.opacity >= MIN_OPACITY && parsed.opacity <= MAX_OPACITY ? parsed.opacity : DEFAULT_OPACITY;
+    return { sizePreset, opacity };
+  } catch {
+    // No settings saved yet, or the file's unreadable/corrupt - fall back to the original look.
+    return { sizePreset: DEFAULT_SIZE_PRESET, opacity: DEFAULT_OPACITY };
+  }
+}
+
+function saveOverlaySettings(settings: OverlaySettings): void {
+  try {
+    writeFileSync(overlaySettingsPath(), JSON.stringify(settings), "utf8");
+  } catch {
+    // Best-effort - losing the remembered settings isn't worth crashing over.
   }
 }
 
@@ -130,11 +198,13 @@ function formatLastCardRefreshLabel(status: CardRefreshStatus | null): string {
 }
 
 let mainWindow: BrowserWindow | null = null;
+let settingsWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let interactive = false; // false = click-through (default)
 let watchingStatus = "Starting...";
 let refreshingCards = false;
 let cardRefreshStatus: CardRefreshStatus | null = null;
+let overlaySettings: OverlaySettings = { sizePreset: DEFAULT_SIZE_PRESET, opacity: DEFAULT_OPACITY };
 // Set once the pipeline (and therefore its dataDir) exists, inside
 // app.whenReady() below - kept as a module-level slot (rather than a
 // closure captured directly by the tray's click handlers) so
@@ -142,15 +212,16 @@ let cardRefreshStatus: CardRefreshStatus | null = null;
 // this file's UI wiring.
 let runCardRefresh: ((skipEnrich: boolean) => void) | null = null;
 
-function createWindow(): BrowserWindow {
+function createWindow(settings: OverlaySettings): BrowserWindow {
+  const preset = SIZE_PRESETS[settings.sizePreset] ?? SIZE_PRESETS[DEFAULT_SIZE_PRESET];
   const display = screen.getPrimaryDisplay();
   const saved = loadSavedPosition();
-  const x = saved?.x ?? display.workArea.x + display.workArea.width - WINDOW_WIDTH - 24;
+  const x = saved?.x ?? display.workArea.x + display.workArea.width - preset.width - 24;
   const y = saved?.y ?? display.workArea.y + 24;
 
   const win = new BrowserWindow({
-    width: WINDOW_WIDTH,
-    height: WINDOW_HEIGHT,
+    width: preset.width,
+    height: preset.height,
     x,
     y,
     frame: false,
@@ -184,6 +255,29 @@ function createWindow(): BrowserWindow {
   return win;
 }
 
+/**
+ * Milestone 9+: applies a (possibly just-changed) size/opacity choice to the
+ * already-running overlay - persists it, resizes the actual window to the
+ * new preset's dimensions (keeping its current top-left corner fixed, so it
+ * grows/shrinks in place rather than jumping to a different part of the
+ * screen), and pushes the resulting font-size + opacity to the overlay's
+ * renderer so it takes effect immediately with no reload/flicker. Also used
+ * once at startup (from within the did-finish-load handler below) to push
+ * the settings loaded from disk, since the window is already created at the
+ * right *size* by createWindow() but the renderer still needs telling what
+ * font-size/opacity that corresponds to.
+ */
+function applyOverlaySettings(settings: OverlaySettings): void {
+  overlaySettings = settings;
+  saveOverlaySettings(settings);
+  const preset = SIZE_PRESETS[settings.sizePreset] ?? SIZE_PRESETS[DEFAULT_SIZE_PRESET];
+  if (mainWindow) {
+    const [x, y] = mainWindow.getPosition();
+    mainWindow.setBounds({ x, y, width: preset.width, height: preset.height });
+    mainWindow.webContents.send("settings", { fontSizePx: BASE_FONT_PX * preset.scale, opacity: settings.opacity });
+  }
+}
+
 function toggleInteractive(): void {
   if (!mainWindow) return;
   interactive = !interactive;
@@ -203,16 +297,48 @@ function toggleStartAtLogin(): void {
 }
 
 /**
+ * Milestone 9+: the small Settings window (size presets + a transparency
+ * slider - see the file header for why this exists instead of more tray
+ * items). Reuses the overlay's own preload.cjs (it exposes a second,
+ * unrelated `settingsApi` alongside `overlay` - see that file's comment),
+ * loads a separate static page, and is a singleton: a second click while
+ * one's already open just focuses it rather than opening another.
+ */
+function openSettingsWindow(): void {
+  if (settingsWindow) {
+    settingsWindow.focus();
+    return;
+  }
+  settingsWindow = new BrowserWindow({
+    width: 320,
+    height: 260,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    title: "MTGA Tracker Settings",
+    webPreferences: {
+      preload: join(__dirname, "preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+  settingsWindow.setMenuBarVisibility(false);
+  settingsWindow.on("closed", () => {
+    settingsWindow = null;
+  });
+  settingsWindow.loadFile(join(__dirname, "renderer", "settings.html"));
+}
+
+/**
  * Rebuilt (rather than mutated in place) every time something it reflects
  * changes - watching status, interactive/click-through state, the login
  * item setting, or a card refresh starting/finishing - since Electron's
- * Menu items don't update reactively once built. This tray menu is still
- * the entire "settings" surface for the app (see the file header for why a
- * dedicated settings window hasn't been built) - the card-refresh section
- * added here (milestone 8+) is exactly the kind of thing that was flagged
- * as a candidate for that if settings kept accumulating; three toggle-ish
- * items plus a status line is still comfortably tray-menu-sized, but a
- * proper settings window is worth reconsidering if more gets added.
+ * Menu items don't update reactively once built. Everything that's just a
+ * toggle or an action still lives directly in this tray menu; "Overlay
+ * Settings..." (milestone 9+) is the one exception, opening the small
+ * window above, because a continuous transparency slider isn't something a
+ * native Tray context menu can host at all, on any platform.
  */
 function rebuildTrayMenu(): void {
   if (!tray) return;
@@ -232,6 +358,7 @@ function rebuildTrayMenu(): void {
       accelerator: "CommandOrControl+Shift+O",
       click: toggleInteractive,
     },
+    { label: "Overlay Settings... (size, transparency)", click: openSettingsWindow },
     { type: "separator" },
     { label: formatLastCardRefreshLabel(cardRefreshStatus), enabled: false },
     {
@@ -261,10 +388,12 @@ function createTray(): Tray {
 
 app.whenReady().then(() => {
   // Tray-only app - no dock icon, no window menu. All settings/quit live in
-  // the tray's context menu (built below) instead.
+  // the tray's context menu (built below), plus the small Settings window
+  // it can open (milestone 9+), instead.
   app.dock?.hide();
 
-  mainWindow = createWindow();
+  overlaySettings = loadOverlaySettings();
+  mainWindow = createWindow(overlaySettings);
   tray = createTray();
 
   const { logPath, fromStart } = parseArgs(process.argv.slice(2));
@@ -341,6 +470,34 @@ app.whenReady().then(() => {
       rebuildTrayMenu();
     }
   };
+
+  // Milestone 9+: Settings window IPC - reads/writes overlaySettings and
+  // applies the result live via applyOverlaySettings() above. The Settings
+  // window never hardcodes the preset list itself; it always renders
+  // whatever get-overlay-settings hands back, so adding/renaming a preset
+  // here is the only place that needs to change.
+  ipcMain.handle("get-overlay-settings", () => ({
+    sizePreset: overlaySettings.sizePreset,
+    opacity: overlaySettings.opacity,
+    presets: Object.entries(SIZE_PRESETS).map(([key, preset]) => ({ key, label: preset.label })),
+  }));
+
+  ipcMain.handle("set-size-preset", (_event, presetKey: unknown) => {
+    if (typeof presetKey !== "string" || !(presetKey in SIZE_PRESETS)) {
+      return { ok: false, reason: "Unknown size preset." };
+    }
+    applyOverlaySettings({ ...overlaySettings, sizePreset: presetKey });
+    return { ok: true, sizePreset: overlaySettings.sizePreset, opacity: overlaySettings.opacity };
+  });
+
+  ipcMain.handle("set-opacity", (_event, opacity: unknown) => {
+    if (typeof opacity !== "number" || !Number.isFinite(opacity)) {
+      return { ok: false, reason: "Invalid opacity value." };
+    }
+    const clamped = Math.min(MAX_OPACITY, Math.max(MIN_OPACITY, opacity));
+    applyOverlaySettings({ ...overlaySettings, opacity: clamped });
+    return { ok: true, sizePreset: overlaySettings.sizePreset, opacity: overlaySettings.opacity };
+  });
 
   // Milestone 7 phase 4: "click the current event to view its deck" - opens
   // a generated static HTML page (data/deck-viewer/<eventId>.html) in the
@@ -422,7 +579,16 @@ app.whenReady().then(() => {
     });
   };
 
-  mainWindow.webContents.once("did-finish-load", sendSnapshot);
+  mainWindow.webContents.once("did-finish-load", () => {
+    sendSnapshot();
+    // Milestone 9+: the window was already created at the right *size* for
+    // overlaySettings (createWindow used it directly), but the renderer
+    // still needs telling what font-size/opacity that corresponds to -
+    // this is that one-time initial push, mirroring what applyOverlaySettings
+    // sends on every later change.
+    const preset = SIZE_PRESETS[overlaySettings.sizePreset] ?? SIZE_PRESETS[DEFAULT_SIZE_PRESET];
+    mainWindow?.webContents.send("settings", { fontSizePx: BASE_FONT_PX * preset.scale, opacity: overlaySettings.opacity });
+  });
 
   if (pipeline.located.found) {
     watchingStatus = `Watching: ${pipeline.located.path}`;
@@ -451,7 +617,9 @@ app.whenReady().then(() => {
   globalShortcut.register("CommandOrControl+Shift+Q", () => app.quit());
 
   console.log(watchingStatus);
-  console.log("Cmd/Ctrl+Shift+O: unlock to drag the overlay.  Cmd/Ctrl+Shift+Q: quit.  Or use the tray icon's menu for both, plus Start at Login and Refresh Card Database.");
+  console.log(
+    "Cmd/Ctrl+Shift+O: unlock to drag the overlay.  Cmd/Ctrl+Shift+Q: quit.  Or use the tray icon's menu for both, plus Start at Login, Overlay Settings (size/transparency), and Refresh Card Database.",
+  );
 
   app.on("will-quit", () => {
     globalShortcut.unregisterAll();
@@ -473,6 +641,7 @@ app.whenReady().then(() => {
 
 app.on("window-all-closed", () => {
   // Deliberately NOT quitting here: this is a tray app, and the overlay is
-  // its only BrowserWindow - closing it (which we never do ourselves, but
-  // just in case) shouldn't kill the tray icon/capture pipeline with it.
+  // its only always-open BrowserWindow - closing it (which we never do
+  // ourselves, but just in case), or closing the Settings window (which the
+  // user does all the time), shouldn't kill the tray icon/capture pipeline.
 });

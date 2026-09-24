@@ -4,6 +4,18 @@
   padding: 0;
 }
 
+/* Base UI scale (2026-09-24): every size below is in rem, relative to this
+   root font-size, so the whole overlay scales uniformly with it. main.ts
+   sets this inline (document.documentElement.style.fontSize) from the
+   user's chosen size preset in the Settings window - 10px is the "Medium"
+   default and matches every px value this file used before the rem
+   conversion, so nothing looks different until someone actually picks a
+   different size. Border widths are deliberately left in px (hairlines
+   look fine at any UI size; scaling them just makes them blurry). */
+html {
+  font-size: 10px;
+}
+
 html,
 body {
   width: 100%;
@@ -30,19 +42,23 @@ body {
   top: 0;
   left: 0;
   right: 0;
-  height: 14px;
+  height: 1.4rem;
   -webkit-app-region: drag;
 }
 
 .panel {
-  margin-top: 14px;
-  height: calc(100% - 14px);
-  background: rgba(12, 12, 16, 0.72);
-  border-radius: 10px;
-  padding: 10px 12px;
+  margin-top: 1.4rem;
+  height: calc(100% - 1.4rem);
+  /* --panel-opacity is set inline by main.ts from the Settings window's
+     transparency slider (0.2-1.0); 0.72 here is just the fallback shown
+     before that first "settings" IPC message arrives, and matches the
+     slider's own default so there's no visible flash either way. */
+  background: rgba(12, 12, 16, var(--panel-opacity, 0.72));
+  border-radius: 1rem;
+  padding: 1rem 1.2rem;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 0.8rem;
   border: 1px solid rgba(255, 255, 255, 0.08);
   -webkit-app-region: drag;
 }
@@ -56,7 +72,7 @@ body.interactive .panel {
 }
 
 .status {
-  font-size: 12px;
+  font-size: 1.2rem;
   color: rgba(255, 255, 255, 0.7);
   text-align: center;
 }
@@ -73,7 +89,7 @@ body.interactive .panel {
 }
 
 .player .name {
-  font-size: 11px;
+  font-size: 1.1rem;
   color: rgba(255, 255, 255, 0.65);
   white-space: nowrap;
   overflow: hidden;
@@ -81,7 +97,7 @@ body.interactive .panel {
 }
 
 .player .life {
-  font-size: 26px;
+  font-size: 2.6rem;
   font-weight: 600;
   line-height: 1.1;
 }
@@ -95,24 +111,24 @@ body.interactive .panel {
 }
 
 .vs {
-  font-size: 10px;
+  font-size: 1rem;
   color: rgba(255, 255, 255, 0.4);
-  padding: 0 8px;
+  padding: 0 0.8rem;
 }
 
 .turn {
-  font-size: 11px;
+  font-size: 1.1rem;
   text-align: center;
   color: rgba(255, 255, 255, 0.6);
-  min-height: 14px;
+  min-height: 1.4rem;
 }
 
 .outcome {
   text-align: center;
-  font-size: 13px;
+  font-size: 1.3rem;
   font-weight: 600;
-  border-radius: 6px;
-  padding: 3px 0;
+  border-radius: 0.6rem;
+  padding: 0.3rem 0;
 }
 
 .outcome.win {
@@ -130,10 +146,10 @@ body.interactive .panel {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  font-size: 11px;
+  font-size: 1.1rem;
   color: rgba(255, 255, 255, 0.75);
   border-top: 1px solid rgba(255, 255, 255, 0.08);
-  padding-top: 6px;
+  padding-top: 0.6rem;
   /* Opt out of the .panel-wide drag region above - these two rows are
      clickable (open the deck viewer / draft-progress page), and a drag
      region takes priority over click handlers in Electron, which would

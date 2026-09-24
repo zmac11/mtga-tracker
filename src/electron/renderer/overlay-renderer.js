@@ -81,7 +81,25 @@ function render({ foundLog, watchingPath, snapshot }) {
   }
 }
 
+// Milestone 9+ (2026-09-24): the overlay's size and background transparency
+// are user-configurable from the Settings window (tray menu > "Overlay
+// Settings..."). main.ts is the source of truth for both - it resizes the
+// actual BrowserWindow to match the chosen size preset and pushes the
+// resulting font-size (everything in overlay.css is in rem, scaled off the
+// root font-size) plus the opacity value here, both on load and any time
+// they change. Applying both through inline styles (rather than, say,
+// reloading the page) means there's no flicker when adjusting the slider.
+function applySettings({ fontSizePx, opacity }) {
+  if (typeof fontSizePx === "number") {
+    document.documentElement.style.fontSize = `${fontSizePx}px`;
+  }
+  if (typeof opacity === "number") {
+    document.documentElement.style.setProperty("--panel-opacity", String(opacity));
+  }
+}
+
 window.overlay.onState(render);
+window.overlay.onSettings(applySettings);
 window.overlay.onInteractiveChanged((interactive) => {
   document.body.classList.toggle("interactive", interactive);
 });

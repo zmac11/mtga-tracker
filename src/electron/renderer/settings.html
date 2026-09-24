@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>MTGA Tracker Settings</title>
+    <link rel="stylesheet" href="settings.css" />
+  </head>
+  <body>
+    <h1>Overlay Settings</h1>
+
+    <section>
+      <h2>Size</h2>
+      <p class="hint">Changes take effect immediately - drag the overlay afterward if it needs repositioning.</p>
+      <div id="size-options" class="size-options">Loading...</div>
+    </section>
+
+    <section>
+      <h2>Background transparency</h2>
+      <p class="hint">Lower is more see-through; higher is more solid.</p>
+      <div class="slider-row">
+        <input type="range" id="opacity-slider" min="20" max="100" step="5" />
+        <span id="opacity-value" class="opacity-value">72%</span>
+      </div>
+    </section>
+
+    <p id="status" class="status"></p>
+
+    <script src="settings-renderer.js"></script>
+  </body>
+</html>
