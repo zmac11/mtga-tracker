@@ -31,6 +31,7 @@ export class CardStore {
         isRebalanced INTEGER NOT NULL,
         rebalancedCardGrpId INTEGER,
         colors TEXT,
+        types TEXT,
         scryfallId TEXT,
         oracleText TEXT,
         manaCost TEXT,
@@ -48,9 +49,9 @@ export class CardStore {
     this.migrateLegacyColorsColumn();
     this.upsertStmt = this.db.prepare(`
       INSERT INTO cards (
-        grpId, name, setCode, collectorNumber, rarityRaw, isToken, isDigitalOnly, isRebalanced, rebalancedCardGrpId, colors,
+        grpId, name, setCode, collectorNumber, rarityRaw, isToken, isDigitalOnly, isRebalanced, rebalancedCardGrpId, colors, types,
         scryfallId, oracleText, manaCost, scryfallColors, scryfallRarity, imageSmall, imageNormal, imageLarge, imagePng, enrichedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(grpId) DO UPDATE SET
         name = excluded.name,
         setCode = excluded.setCode,
@@ -61,6 +62,7 @@ export class CardStore {
         isRebalanced = excluded.isRebalanced,
         rebalancedCardGrpId = excluded.rebalancedCardGrpId,
         colors = excluded.colors,
+        types = excluded.types,
         scryfallId = excluded.scryfallId,
         oracleText = excluded.oracleText,
         manaCost = excluded.manaCost,
@@ -82,9 +84,9 @@ export class CardStore {
     // same Arena-side extraction this statement is for.
     this.syncArenaStmt = this.db.prepare(`
       INSERT INTO cards (
-        grpId, name, setCode, collectorNumber, rarityRaw, isToken, isDigitalOnly, isRebalanced, rebalancedCardGrpId, colors,
+        grpId, name, setCode, collectorNumber, rarityRaw, isToken, isDigitalOnly, isRebalanced, rebalancedCardGrpId, colors, types,
         scryfallId, oracleText, manaCost, scryfallColors, scryfallRarity, imageSmall, imageNormal, imageLarge, imagePng, enrichedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)
       ON CONFLICT(grpId) DO UPDATE SET
         name = excluded.name,
         setCode = excluded.setCode,
@@ -94,7 +96,8 @@ export class CardStore {
         isDigitalOnly = excluded.isDigitalOnly,
         isRebalanced = excluded.isRebalanced,
         rebalancedCardGrpId = excluded.rebalancedCardGrpId,
-        colors = excluded.colors
+        colors = excluded.colors,
+        types = excluded.types
     `);
   }
 
@@ -113,6 +116,13 @@ export class CardStore {
       this.db.exec("ALTER TABLE cards RENAME COLUMN colors TO scryfallColors;");
       this.db.exec("ALTER TABLE cards ADD COLUMN colors TEXT;");
     }
+    // Added alongside `colors` above but as a plain new column (no prior
+    // column to rename out of the way) - milestone 7 phase 4's deck viewer
+    // needs Arena's own decoded card types for its creature/non-creature
+    // curve mode.
+    if (!columns.includes("types")) {
+      this.db.exec("ALTER TABLE cards ADD COLUMN types TEXT;");
+    }
   }
 
   upsert(card: EnrichedCard): void {
@@ -127,6 +137,7 @@ export class CardStore {
       card.isRebalanced ? 1 : 0,
       card.rebalancedCardGrpId,
       JSON.stringify(card.colors),
+      JSON.stringify(card.types),
       card.scryfallId,
       card.oracleText,
       card.manaCost,
@@ -175,6 +186,7 @@ export class CardStore {
           c.isRebalanced ? 1 : 0,
           c.rebalancedCardGrpId,
           JSON.stringify(c.colors),
+          JSON.stringify(c.types),
         );
       }
       this.db.exec("COMMIT");
@@ -218,6 +230,7 @@ interface RawCardRow {
   isRebalanced: number;
   rebalancedCardGrpId: number | null;
   colors: string | null;
+  types: string | null;
   scryfallId: string | null;
   oracleText: string | null;
   manaCost: string | null;
@@ -242,6 +255,7 @@ function rowToCard(row: RawCardRow): EnrichedCard {
     isRebalanced: Boolean(row.isRebalanced),
     rebalancedCardGrpId: row.rebalancedCardGrpId,
     colors: row.colors ? JSON.parse(row.colors) : [],
+    types: row.types ? JSON.parse(row.types) : [],
     scryfallId: row.scryfallId,
     oracleText: row.oracleText,
     manaCost: row.manaCost,

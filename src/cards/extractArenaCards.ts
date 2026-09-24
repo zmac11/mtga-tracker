@@ -50,7 +50,8 @@ const NAME_QUERY = `
     c.IsDigitalOnly    AS isDigitalOnly,
     c.IsRebalanced     AS isRebalanced,
     c.RebalancedCardGrpId AS rebalancedCardGrpId,
-    c.Colors           AS colorsRaw
+    c.Colors           AS colorsRaw,
+    c.Types            AS typesRaw
   FROM Cards c
   LEFT JOIN Localizations_enUS l ON l.LocId = c.TitleId AND l.Formatted = 1
 `;
@@ -73,6 +74,36 @@ export function decodeArenaColors(raw: string | null): string[] {
   return WUBRG_ORDER.filter((letter) => letters.includes(letter));
 }
 
+/** Arena's own CardType enum ids, confirmed against the Enums table (Type='CardType'). */
+const ARENA_TYPE_MAP: Record<string, string> = {
+  "1": "Artifact",
+  "2": "Creature",
+  "3": "Enchantment",
+  "4": "Instant",
+  "5": "Land",
+  "6": "Phenomenon",
+  "7": "Plane",
+  "8": "Planeswalker",
+  "9": "Scheme",
+  "10": "Sorcery",
+  "11": "Kindred",
+  "12": "Vanguard",
+  "13": "Dungeon",
+  "14": "Battle",
+  "15": "Conspiracy",
+};
+
+/** Decodes Arena's comma-separated `Types` string into card type names (e.g. "Creature", "Instant"). Empty/null/unrecognized ids are dropped rather than thrown on. */
+export function decodeArenaTypes(raw: string | null): string[] {
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0)
+    .map((id) => ARENA_TYPE_MAP[id])
+    .filter((type): type is string => Boolean(type));
+}
+
 interface RawRow {
   grpId: number;
   name: string | null;
@@ -84,6 +115,7 @@ interface RawRow {
   isRebalanced: number;
   rebalancedCardGrpId: number;
   colorsRaw: string | null;
+  typesRaw: string | null;
 }
 
 /**
@@ -109,6 +141,7 @@ export function extractArenaCards(dbPath: string): ArenaCard[] {
         isRebalanced: Boolean(row.isRebalanced),
         rebalancedCardGrpId: row.rebalancedCardGrpId ? row.rebalancedCardGrpId : null,
         colors: decodeArenaColors(row.colorsRaw),
+        types: decodeArenaTypes(row.typesRaw),
       });
     }
     return cards;

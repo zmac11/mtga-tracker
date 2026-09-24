@@ -127,6 +127,14 @@ body.interactive .panel {
   padding-top: 6px;
 }
 
+/* Only looks/acts clickable once unlocked (Cmd/Ctrl+Shift+O) - matches the
+   drag-handle's same interactive-only affordance above, and clicks don't
+   reach this element at all while click-through/locked anyway. */
+body.interactive .event-record:hover {
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.95);
+}
+
 .event-name {
   overflow: hidden;
   text-overflow: ellipsis;

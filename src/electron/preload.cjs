@@ -12,4 +12,5 @@ contextBridge.exposeInMainWorld("overlay", {
   onInteractiveChanged: (callback) => {
     ipcRenderer.on("interactive-changed", (_event, interactive) => callback(interactive));
   },
+  openDeckViewer: () => ipcRenderer.invoke("open-deck-viewer"),
 });

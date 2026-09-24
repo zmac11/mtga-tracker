@@ -37,6 +37,17 @@ export interface ArenaCard {
    * Scryfall-sourced equivalent, kept only for reference/cross-checking).
    */
   colors: string[];
+  /**
+   * Decoded from Arena's own `Cards.Types` column (comma-separated small
+   * integers, joined against the `Enums` table's "CardType" type - confirmed
+   * 2026-09-24 against the real sample database: 1=Artifact, 2=Creature,
+   * 3=Enchantment, 4=Instant, 5=Land, 6=Phenomenon, 7=Plane, 8=Planeswalker,
+   * 9=Scheme, 10=Sorcery, 11=Kindred, 12=Vanguard, 13=Dungeon, 14=Battle,
+   * 15=Conspiracy). Always an array (rarely empty in practice). Like
+   * `colors`, available without any Scryfall enrichment - used for the
+   * milestone 7 phase 4 deck viewer's creature/non-creature curve mode.
+   */
+  types: string[];
 }
 
 /** ArenaCard enriched with Scryfall data, joined on Scryfall's arena_id == Arena's grpId. */

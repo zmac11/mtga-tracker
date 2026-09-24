@@ -9,3 +9,4 @@ samples/*.json
 .DS_Store
 *.mtga
 data/cards-cache/
+data/deck-viewer/

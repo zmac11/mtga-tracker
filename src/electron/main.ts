@@ -1,9 +1,13 @@
-import { app, BrowserWindow, globalShortcut, Menu, nativeImage, screen, Tray } from "electron";
+import { app, BrowserWindow, globalShortcut, ipcMain, Menu, nativeImage, screen, shell, Tray } from "electron";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CapturePipeline } from "../pipeline.js";
 import { LiveStateTracker } from "../domain/liveState.js";
+import { TypedEventStore } from "../db/sqliteStore.js";
+import { CardStore } from "../cards/cardStore.js";
+import { buildDeckViewerData } from "../deckViewerLoader.js";
+import { generateDeckViewerHtml } from "../deckViewerHtml.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -183,6 +187,43 @@ app.whenReady().then(() => {
   // correct data was already sitting in tracker.db. See
   // LiveStateTracker.seedHistory's comment for the bug this fixes.
   liveState.seedHistory(pipeline.historyForSeeding());
+
+  // Milestone 7 phase 4: "click the current event to view its deck" - opens
+  // a generated static HTML page (data/deck-viewer/<eventId>.html) in the
+  // user's default browser, per the UI-surface decision in
+  // feature-roadmap-milestone7.md. Deliberately opens fresh, short-lived
+  // TypedEventStore/CardStore connections rather than sharing the pipeline's
+  // - this is a one-shot read-then-close on click, not something that needs
+  // to stay open, and keeping it separate avoids any risk of interfering
+  // with the pipeline's own long-lived connection.
+  ipcMain.handle("open-deck-viewer", () => {
+    const currentEventId = liveState.snapshot().eventRecord?.eventId;
+    if (!currentEventId) return { ok: false, reason: "No current event to show yet." };
+
+    const dbPath = join(pipeline.dataDir, "tracker.db");
+    let store: TypedEventStore | null = null;
+    let cardStore: CardStore | null = null;
+    try {
+      store = new TypedEventStore(dbPath);
+      cardStore = new CardStore(dbPath);
+      const data = buildDeckViewerData(currentEventId, store, cardStore);
+      if (!data) return { ok: false, reason: `No deck/draft data captured yet for ${currentEventId}.` };
+
+      const html = generateDeckViewerHtml(data);
+      const outDir = join(pipeline.dataDir, "deck-viewer");
+      mkdirSync(outDir, { recursive: true });
+      const outPath = join(outDir, `${currentEventId.replace(/[^A-Za-z0-9_-]/g, "_")}.html`);
+      writeFileSync(outPath, html, "utf8");
+      shell.openPath(outPath);
+      return { ok: true };
+    } catch (err) {
+      console.error("Failed to generate/open deck viewer:", err);
+      return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+    } finally {
+      store?.close();
+      cardStore?.close();
+    }
+  });
 
   const sendSnapshot = () => {
     mainWindow?.webContents.send("state", {

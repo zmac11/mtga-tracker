@@ -18,7 +18,8 @@
     "backfill": "tsx src/backfill.ts",
     "report": "tsx src/report.ts",
     "overlay": "npm run build && electron .",
-    "refresh-cards": "tsx src/refreshCards.ts"
+    "refresh-cards": "tsx src/refreshCards.ts",
+    "deck-viewer": "tsx src/generateDeckViewer.ts"
   },
   "dependencies": {
     "chokidar": "^3.6.0"

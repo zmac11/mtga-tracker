@@ -69,3 +69,17 @@ window.overlay.onState(render);
 window.overlay.onInteractiveChanged((interactive) => {
   document.body.classList.toggle("interactive", interactive);
 });
+
+// Milestone 7 phase 4: clicking the event record opens that event's deck
+// viewer (a static HTML page) in the default browser. Only reachable when
+// the overlay is unlocked (Cmd/Ctrl+Shift+O) since it's click-through by
+// default - same constraint as dragging the overlay, and documented in the
+// element's title/tooltip above.
+els.eventRecord.addEventListener("click", async () => {
+  const result = await window.overlay.openDeckViewer();
+  if (!result || !result.ok) {
+    const reason = result && result.reason ? result.reason : "Could not open the deck viewer.";
+    els.eventWl.title = reason;
+    console.warn("Deck viewer:", reason);
+  }
+});
