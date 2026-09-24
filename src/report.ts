@@ -3,6 +3,8 @@ import { fileURLToPath } from "node:url";
 import { TypedEventStore } from "./db/sqliteStore.js";
 import type { DraftPickMade } from "./domain/types.js";
 import { computeMatchOutcomes, rollupByEvent, rollupByEventDefinition, rollupBySubtype, rollupByFormat, winRate } from "./domain/rollups.js";
+import { buildEventRunHistory, listEventRuns } from "./domain/eventHistory.js";
+import { loadEventHistorySource } from "./eventHistoryLoader.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -20,8 +22,9 @@ type GroupByLevel = "run" | "definition" | "subtype" | "format" | "all";
  * history" example) already existed before this flag; this just makes it
  * one of several selectable levels instead of the only non-per-run option.
  */
-function parseArgs(argv: string[]): { groupBy: GroupByLevel } {
+function parseArgs(argv: string[]): { groupBy: GroupByLevel; eventId: string | null } {
   let groupBy: GroupByLevel = "all";
+  let eventId: string | null = null;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg.startsWith("--group-by=")) {
@@ -31,9 +34,11 @@ function parseArgs(argv: string[]): { groupBy: GroupByLevel } {
       } else {
         console.error(`Unknown --group-by value "${value}" - expected one of: run, definition, subtype, format, all. Falling back to "all".`);
       }
+    } else if (arg.startsWith("--event=")) {
+      eventId = arg.slice("--event=".length);
     }
   }
-  return { groupBy };
+  return { groupBy, eventId };
 }
 
 /**
@@ -42,7 +47,7 @@ function parseArgs(argv: string[]): { groupBy: GroupByLevel } {
  * events add up to something useful (deck used, draft picks, win/loss).
  */
 function main() {
-  const { groupBy } = parseArgs(process.argv.slice(2));
+  const { groupBy, eventId } = parseArgs(process.argv.slice(2));
   const dbPath = join(__dirname, "..", "data", "tracker.db");
   const store = new TypedEventStore(dbPath);
 
@@ -194,6 +199,41 @@ function main() {
         `  - ${format} (${definitionKeys.length} event type${definitionKeys.length === 1 ? "" : "s"}): ${wins}-${losses}` +
           (total > 0 ? ` (${pct} over ${total} decided match${total === 1 ? "" : "es"})` : " (no decided matches yet)"),
       );
+    }
+  }
+
+  // --- Per-run event history (milestone 7 phase 2) ---
+  // `--event=<eventId>` prints one specific run's full history (deck,
+  // sideboard, draft pick sequence, matches) - the same data the planned
+  // deck-viewer/draft-history UI will read, surfaced here first so it can be
+  // validated against real data before any UI is built on top of it.
+  if (eventId) {
+    const source = loadEventHistorySource(store);
+    const knownRuns = listEventRuns(source);
+    if (!knownRuns.some((r) => r.eventId === eventId)) {
+      console.log(`\n=== Event history: ${eventId} ===`);
+      console.log("(no data captured for this exact eventId - known event runs:)");
+      for (const r of knownRuns) console.log(`  - ${r.eventId}`);
+    } else {
+      const history = buildEventRunHistory(eventId, source);
+      console.log(`\n=== Event history: ${eventId} ===`);
+      console.log(`Type: [${history.identity.format}] ${history.identity.definitionLabel}`);
+      if (history.deck) {
+        const mainCount = history.deck.mainDeck.reduce((n, x) => n + x.quantity, 0);
+        console.log(`Deck: "${history.deck.deckName}" (${mainCount} cards)`);
+        console.log(`  Maindeck: ${history.deck.mainDeck.map((c) => `${c.quantity}x ${c.cardId}`).join(", ")}`);
+        if (history.deck.sideboard) {
+          const sideCount = history.deck.sideboard.reduce((n, x) => n + x.quantity, 0);
+          console.log(`  Sideboard (${sideCount} cards): ${history.deck.sideboard.map((c) => `${c.quantity}x ${c.cardId}`).join(", ") || "(none)"}`);
+        } else {
+          console.log("  Sideboard: (no DraftCompleted captured, so pool/sideboard can't be derived)");
+        }
+      } else {
+        console.log("Deck: (no DeckSubmitted captured for this run)");
+      }
+      console.log(`Draft picks captured: ${history.picks.length}${history.picks.length > 0 ? ` (pack ${history.picks[0].pack} pick ${history.picks[0].pick} .. pack ${history.picks.at(-1)!.pack} pick ${history.picks.at(-1)!.pick})` : ""}`);
+      console.log(`Packs seen captured: ${history.packsSeen.length}`);
+      console.log(`Matches: ${history.matches.length} (${history.winRate.wins}-${history.winRate.losses}${history.winRate.total > 0 ? `, ${history.winRate.pct}` : ""})`);
     }
   }
 
