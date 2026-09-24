@@ -1,5 +1,21 @@
-import type { CourseStanding, DeckSubmitted, DomainEvent, GameStateSnapshot, MatchCompleted, MatchFound } from "./types.js";
+import type {
+  CourseStanding,
+  DeckSubmitted,
+  DomainEvent,
+  DraftCompleted,
+  DraftPackSeen,
+  DraftPickMade,
+  GameStateSnapshot,
+  MatchCompleted,
+  MatchFound,
+} from "./types.js";
 import { computeMatchOutcomes, rollupByEvent, winRate, winRateFromCounts, type WinRate } from "./rollups.js";
+
+function dedupeLatestByKey<T>(items: T[], keyFn: (item: T) => string): T[] {
+  const map = new Map<string, T>();
+  for (const item of items) map.set(keyFn(item), item);
+  return [...map.values()];
+}
 
 export interface OverlayPlayer {
   name: string;
@@ -19,12 +35,32 @@ export interface OverlayMatch {
   reason: string | null;
 }
 
+/**
+ * Milestone 7 phase 5: bare-bones live draft state - grpIds only, no
+ * name/color/image resolution (that needs CardStore, which this Electron-
+ * free/DB-free layer deliberately doesn't have - see draftProgressLoader.ts
+ * for where that join happens, same pattern as deckViewerLoader.ts).
+ */
+export interface DraftProgress {
+  /** See DraftPackSeen.draftId's comment in types.ts for what this is per draft type. */
+  draftId: string;
+  /** 1-indexed, matching Arena's own UI (see classifier.ts). */
+  pack: number;
+  pick: number;
+  /** The pack currently being offered (grpIds) - whatever the most recent DraftPackSeen for this draft said. */
+  packCards: number[];
+  /** Every pick made so far this draft, in (pack, pick) order, deduped to the latest per (pack, pick) - same convention as eventHistory.ts. */
+  picks: Array<{ pack: number; pick: number; grpId: number }>;
+}
+
 export interface OverlaySnapshot {
   myScreenName: string | null;
   /** The most recent match we've seen, whether or not it's finished. Null before any match is found. */
   match: OverlayMatch | null;
   /** Win/loss record for the current match's event (or the most recent event, if no match is active yet). */
   eventRecord: (WinRate & { eventId: string; deckName: string | null }) | null;
+  /** Null when no draft is currently in progress (none seen yet, or the last one seen has already completed). */
+  currentDraft: DraftProgress | null;
 }
 
 /**
@@ -60,6 +96,20 @@ export class LiveStateTracker {
    * it was behind Arena's own bookkeeping).
    */
   private courseStandings = new Map<string, CourseStanding>();
+  /**
+   * Milestone 7 phase 5 - live draft progress. Kept as plain unbounded
+   * arrays across every draft ever seen this run, same convention as
+   * matchFounds/matchCompletions/deckSubmissions above (fine at this data
+   * volume - see sqliteStore.ts's own comment on the same tradeoff).
+   * `lastActiveDraftId` is whichever draft most recently had pack/pick
+   * activity; `completedDraftIds` marks ones that have finished, so
+   * snapshot() below can tell "a draft happened and ended" apart from "a
+   * draft is happening right now".
+   */
+  private draftPacksSeen: DraftPackSeen[] = [];
+  private draftPicksMade: DraftPickMade[] = [];
+  private completedDraftIds = new Set<string>();
+  private lastActiveDraftId: string | null = null;
 
   record(event: DomainEvent): void {
     switch (event.kind) {
@@ -88,9 +138,23 @@ export class LiveStateTracker {
         // simply correct, whatever we had cached before.
         this.courseStandings.set(event.eventId, event);
         break;
-      // Draft events (DraftJoined/DraftPackSeen/DraftPickMade/DraftCompleted)
-      // aren't needed for the match HUD or event win-rate panel yet - the
-      // overlay's first version doesn't show draft-in-progress info.
+      case "DraftPackSeen":
+        this.draftPacksSeen.push(event);
+        this.lastActiveDraftId = event.draftId;
+        break;
+      case "DraftPickMade":
+        this.draftPicksMade.push(event);
+        this.lastActiveDraftId = event.draftId;
+        break;
+      case "DraftCompleted":
+        // draftId is only ever null if a DraftCompleteDraft response arrives
+        // with no pack/pick activity captured earlier in this same process
+        // (see classifier.ts's comment on currentDraftId) - an edge case
+        // that just means there was nothing live to mark as finished anyway.
+        if (event.draftId) this.completedDraftIds.add(event.draftId);
+        break;
+      // DraftJoined isn't needed for anything shown yet - the join itself
+      // carries no pack/pick/progress info, just entry-fee bookkeeping.
       default:
         break;
     }
@@ -129,10 +193,34 @@ export class LiveStateTracker {
         case "CourseStanding":
           this.courseStandings.set(event.eventId, event);
           break;
+        case "DraftPackSeen":
+          this.draftPacksSeen.push(event);
+          break;
+        case "DraftPickMade":
+          this.draftPicksMade.push(event);
+          break;
+        case "DraftCompleted":
+          if (event.draftId) this.completedDraftIds.add(event.draftId);
+          break;
         default:
           break;
       }
     }
+    // Unlike currentMatchId above (deliberately NOT set from seeded history,
+    // so a relaunch doesn't show a long-finished match's HUD as if it were
+    // live right now), resuming a genuinely still-in-progress draft on
+    // relaunch IS the correct behavior here, not "faking" anything - if the
+    // last draft we have any record of hasn't completed, it may well still
+    // be running. historyForSeeding() hands back each event kind as its own
+    // array (not merged chronologically - see its own comment), so finding
+    // "whichever draft most recently had activity" needs an actual sort by
+    // real timestamp across both pack and pick events, not just the last
+    // element of one array.
+    const activity: Array<DraftPackSeen | DraftPickMade> = [...this.draftPacksSeen, ...this.draftPicksMade].sort((a, b) =>
+      a.ts.localeCompare(b.ts),
+    );
+    const lastActivity = activity.at(-1);
+    if (lastActivity) this.lastActiveDraftId = lastActivity.draftId;
   }
 
   snapshot(): OverlaySnapshot {
@@ -197,6 +285,29 @@ export class LiveStateTracker {
       };
     }
 
-    return { myScreenName: this.myScreenName, match, eventRecord };
+    let currentDraft: DraftProgress | null = null;
+    if (this.lastActiveDraftId && !this.completedDraftIds.has(this.lastActiveDraftId)) {
+      const draftId = this.lastActiveDraftId;
+      // "Current pack" is whichever DraftPackSeen for this draft arrived
+      // most recently (arrival order, not (pack,pick)-sorted - it's
+      // genuinely the last one the client showed us, including a wheeled-
+      // back pack with fewer cards than when we first saw it at this same
+      // pick). Packs/picks arriving together (Bot Draft - see classifier.ts)
+      // or a beat apart (human draft) both work fine here since we only
+      // ever look at the most recent of each independently.
+      const packsForDraft = this.draftPacksSeen.filter((p) => p.draftId === draftId);
+      const latestPack = packsForDraft.at(-1) ?? null;
+
+      const picksForDraft = this.draftPicksMade.filter((p) => p.draftId === draftId);
+      const picks = dedupeLatestByKey(picksForDraft, (p) => `${p.pack}|${p.pick}`)
+        .sort((a, b) => a.pack - b.pack || a.pick - b.pick)
+        .map((p) => ({ pack: p.pack, pick: p.pick, grpId: p.grpId }));
+
+      if (latestPack) {
+        currentDraft = { draftId, pack: latestPack.pack, pick: latestPack.pick, packCards: latestPack.packCards, picks };
+      }
+    }
+
+    return { myScreenName: this.myScreenName, match, eventRecord, currentDraft };
   }
 }

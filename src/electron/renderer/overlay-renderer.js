@@ -14,6 +14,9 @@ const els = {
   eventRecord: document.getElementById("event-record"),
   eventName: document.getElementById("event-name"),
   eventWl: document.getElementById("event-wl"),
+  draftProgress: document.getElementById("draft-progress"),
+  draftPackPick: document.getElementById("draft-pack-pick"),
+  draftPicked: document.getElementById("draft-picked"),
 };
 
 function setStatus(text) {
@@ -26,10 +29,11 @@ function render({ foundLog, watchingPath, snapshot }) {
   if (!foundLog) {
     setStatus("Player.log not found. Enable Options > Account > Detailed Logs, then relaunch Arena.");
     els.eventRecord.classList.add("hidden");
+    els.draftProgress.classList.add("hidden");
     return;
   }
 
-  const { match, eventRecord } = snapshot;
+  const { match, eventRecord, currentDraft } = snapshot;
 
   if (!match) {
     setStatus("Watching for a match...");
@@ -63,6 +67,14 @@ function render({ foundLog, watchingPath, snapshot }) {
   } else {
     els.eventRecord.classList.add("hidden");
   }
+
+  if (currentDraft) {
+    els.draftProgress.classList.remove("hidden");
+    els.draftPackPick.textContent = `Pack ${currentDraft.pack}, Pick ${currentDraft.pick}`;
+    els.draftPicked.textContent = `${currentDraft.picks.length} picked`;
+  } else {
+    els.draftProgress.classList.add("hidden");
+  }
 }
 
 window.overlay.onState(render);
@@ -81,5 +93,16 @@ els.eventRecord.addEventListener("click", async () => {
     const reason = result && result.reason ? result.reason : "Could not open the deck viewer.";
     els.eventWl.title = reason;
     console.warn("Deck viewer:", reason);
+  }
+});
+
+// Milestone 7 phase 5: clicking the draft-progress line opens the live
+// draft-progress page (a static HTML page that auto-refreshes itself - see
+// draftProgressHtml.ts). Same unlock-first constraint as the event record
+// above.
+els.draftProgress.addEventListener("click", async () => {
+  const result = await window.overlay.openDraftProgress();
+  if (!result || !result.ok) {
+    console.warn("Draft progress:", (result && result.reason) || "Could not open the draft-progress page.");
   }
 });

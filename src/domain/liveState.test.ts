@@ -17,6 +17,7 @@ function run() {
   assert.equal(snap.myScreenName, null);
   assert.equal(snap.match, null);
   assert.equal(snap.eventRecord, null);
+  assert.equal(snap.currentDraft, null);
 
   t.record({ kind: "PlayerIdentified", screenName: "Me", clientId: "c1", ts: "t0" });
   t.record({ kind: "DeckSubmitted", eventName: "Event1", deckId: "d1", deckName: "My Deck", mainDeck: [], ts: "t1" });
@@ -227,7 +228,71 @@ function run() {
   assert.equal(freshSnap.match?.matchId, "m9");
   assert.equal(freshSnap.match?.opponent?.name, "OppNew");
 
-  console.log("OK: LiveStateTracker handled match found/game-state/completed, accumulating win rate per event without cross-contamination, reconciled with Arena's own CourseStanding in both directions, and seeded correct history at startup without faking a live match.");
+  // Milestone 7 phase 5: live draft progress. A pack is seen, then picked
+  // from, then the next pack (the wheel isn't tested here - that's phase 6 -
+  // just that "current pack/pick" tracks the latest of each independently).
+  t.record({ kind: "DraftPackSeen", draftId: "draftA", pack: 1, pick: 1, packCards: [101, 102, 103], ts: "d0" });
+  snap = t.snapshot();
+  assert.ok(snap.currentDraft);
+  assert.equal(snap.currentDraft?.draftId, "draftA");
+  assert.equal(snap.currentDraft?.pack, 1);
+  assert.equal(snap.currentDraft?.pick, 1);
+  assert.deepEqual(snap.currentDraft?.packCards, [101, 102, 103]);
+  assert.deepEqual(snap.currentDraft?.picks, []);
+
+  t.record({ kind: "DraftPickMade", draftId: "draftA", pack: 1, pick: 1, grpId: 101, success: true, ts: "d1" });
+  snap = t.snapshot();
+  assert.deepEqual(snap.currentDraft?.picks, [{ pack: 1, pick: 1, grpId: 101 }]);
+  assert.equal(snap.currentDraft?.pick, 1); // next pack hasn't arrived yet - pack/pick number still reflects the last-seen pack
+
+  t.record({ kind: "DraftPackSeen", draftId: "draftA", pack: 1, pick: 2, packCards: [104, 105], ts: "d2" });
+  snap = t.snapshot();
+  assert.equal(snap.currentDraft?.pick, 2);
+  assert.deepEqual(snap.currentDraft?.packCards, [104, 105]);
+
+  // Draft finishes - no longer "current", whatever else happens to the state above.
+  t.record({ kind: "DraftCompleted", eventName: "Event6", courseId: "course-6", cardPool: [101, 104], draftId: "draftA", ts: "d3" });
+  snap = t.snapshot();
+  assert.equal(snap.currentDraft, null);
+
+  // A later, different draft starting up shouldn't be confused with the
+  // just-completed one - it becomes the new "current" draft normally.
+  t.record({ kind: "DraftPackSeen", draftId: "draftB", pack: 1, pick: 1, packCards: [201, 202], ts: "d4" });
+  snap = t.snapshot();
+  assert.equal(snap.currentDraft?.draftId, "draftB");
+
+  // seedHistory resuming a genuinely still-in-progress draft: unlike a
+  // finished match's HUD (deliberately not resumed - see seedHistory's own
+  // comment), a draft with no DraftCompleted seen yet really might still be
+  // running, so this should come back live. Mixes in an OLDER, already-
+  // completed draft too, to prove "most recent by real timestamp" wins over
+  // array-push order (draftOld's events are seeded first).
+  const freshDraft = new LiveStateTracker();
+  freshDraft.seedHistory([
+    { kind: "DraftPackSeen", draftId: "draftOld", pack: 1, pick: 1, packCards: [1, 2], ts: "s0" },
+    { kind: "DraftPickMade", draftId: "draftOld", pack: 1, pick: 1, grpId: 1, success: true, ts: "s1" },
+    { kind: "DraftCompleted", eventName: "EventOld", courseId: "c-old", cardPool: [1], draftId: "draftOld", ts: "s2" },
+    { kind: "DraftPackSeen", draftId: "draftNew", pack: 1, pick: 1, packCards: [10, 11], ts: "s3" },
+    { kind: "DraftPickMade", draftId: "draftNew", pack: 1, pick: 1, grpId: 10, success: true, ts: "s4" },
+    { kind: "DraftPackSeen", draftId: "draftNew", pack: 1, pick: 2, packCards: [12, 13], ts: "s5" },
+  ]);
+  const draftSnap = freshDraft.snapshot();
+  assert.equal(draftSnap.currentDraft?.draftId, "draftNew");
+  assert.equal(draftSnap.currentDraft?.pack, 1);
+  assert.equal(draftSnap.currentDraft?.pick, 2);
+  assert.deepEqual(draftSnap.currentDraft?.picks, [{ pack: 1, pick: 1, grpId: 10 }]);
+
+  // seedHistory with ONLY a completed draft (no later activity at all) - must not resume as live.
+  const freshCompletedDraft = new LiveStateTracker();
+  freshCompletedDraft.seedHistory([
+    { kind: "DraftPackSeen", draftId: "draftX", pack: 1, pick: 1, packCards: [1], ts: "x0" },
+    { kind: "DraftCompleted", eventName: "EventX", courseId: "c-x", cardPool: [1], draftId: "draftX", ts: "x1" },
+  ]);
+  assert.equal(freshCompletedDraft.snapshot().currentDraft, null);
+
+  console.log(
+    "OK: LiveStateTracker handled match found/game-state/completed, accumulating win rate per event without cross-contamination, reconciled with Arena's own CourseStanding in both directions, seeded correct history at startup without faking a live match, and tracked/resumed live draft progress correctly.",
+  );
 }
 
 run();

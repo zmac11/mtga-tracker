@@ -1,4 +1,5 @@
 import { groupByManaCurve, type CardCurveInfo } from "./domain/manaCurve.js";
+import { CARD_PREVIEW_CSS, cardPreviewInnerHtml, colorDotsHtml, escapeHtml } from "./htmlCardHelpers.js";
 
 /**
  * Milestone 7 phase 4: generates the deck-viewer browser page for one event
@@ -27,6 +28,27 @@ export interface ViewerCard {
   imageNormal: string | null;
 }
 
+/** A card as it appears inside a draft pick's pack - see htmlCardHelpers.ts's HtmlCard (this shape is structurally compatible with it). */
+export interface DraftViewerPickCard {
+  cardId: number;
+  name: string;
+  colors: string[];
+  oracleText: string | null;
+  imageNormal: string | null;
+}
+
+export interface DraftViewerPick {
+  pack: number;
+  pick: number;
+  /** The full pack as first offered at this pick, in original order (includes the picked card). */
+  packCards: DraftViewerPickCard[];
+  pickedCardId: number;
+  /** Where this same physical pack was next seen (wheeled back), or null - see draftWheel.ts's WheelInfo. */
+  wheeledAt: { pack: number; pick: number } | null;
+  /** Cards gone from this pack by the wheel point, taken by other pod members (excludes this player's own pick) - empty/meaningless when wheeledAt is null. */
+  takenByOthers: DraftViewerPickCard[];
+}
+
 export interface DeckViewerData {
   eventId: string;
   format: string;
@@ -38,32 +60,17 @@ export interface DeckViewerData {
   mainDeck: ViewerCard[];
   /** Null when there's no DraftCompleted captured for this run to derive a sideboard from (see eventHistory.ts). */
   sideboard: ViewerCard[] | null;
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-
-function colorDotsHtml(colors: string[]): string {
-  if (colors.length === 0) return `<span class="dot dot-C" title="Colorless"></span>`;
-  return colors.map((c) => `<span class="dot dot-${escapeHtml(c)}" title="${escapeHtml(c)}"></span>`).join("");
+  /** Pick-by-pick draft data (milestone 7 phase 6) - empty when this run has no captured DraftPickMade/DraftPackSeen data (e.g. not a draft event, or nothing was captured), in which case the "Draft" tab isn't shown at all. */
+  draft: DraftViewerPick[];
 }
 
 function cardRowHtml(card: ViewerCard): string {
-  const previewParts: string[] = [];
-  if (card.imageNormal) {
-    previewParts.push(`<img src="${escapeHtml(card.imageNormal)}" alt="${escapeHtml(card.name)}">`);
-  } else if (card.oracleText) {
-    previewParts.push(`<div class="preview-text"><strong>${escapeHtml(card.name)}</strong><br>${escapeHtml(card.oracleText).replace(/\n/g, "<br>")}</div>`);
-  } else {
-    previewParts.push(`<div class="preview-text">${escapeHtml(card.name)} - no image or text yet (run <code>npm run refresh-cards</code> without --skip-enrich)</div>`);
-  }
   return `
     <li class="card-row" tabindex="0">
       <span class="qty">${card.quantity}x</span>
       ${colorDotsHtml(card.colors)}
       <span class="name">${escapeHtml(card.name)}</span>
-      <div class="preview">${previewParts.join("")}</div>
+      <div class="preview">${cardPreviewInnerHtml(card)}</div>
     </li>`;
 }
 
@@ -123,6 +130,41 @@ function curveHtml(mainDeck: ViewerCard[]): string {
     </section>`;
 }
 
+function draftPickCardHtml(card: DraftViewerPickCard, isPick: boolean): string {
+  return `
+    <li class="card-row draft-card-row${isPick ? " picked" : ""}" tabindex="0">
+      ${colorDotsHtml(card.colors)}
+      <span class="name">${escapeHtml(card.name)}</span>
+      ${isPick ? `<span class="picked-badge" title="You took this">&#10003;</span>` : ""}
+      <div class="preview">${cardPreviewInnerHtml(card)}</div>
+    </li>`;
+}
+
+function draftPickHtml(entry: DraftViewerPick): string {
+  const wheelLine = entry.wheeledAt
+    ? `Wheeled to Pack ${entry.wheeledAt.pack}, Pick ${entry.wheeledAt.pick}` +
+      (entry.takenByOthers.length > 0
+        ? ` &middot; taken by others: ${entry.takenByOthers.map((c) => escapeHtml(c.name)).join(", ")}`
+        : ` &middot; nothing else was taken`)
+    : `Did not wheel back`;
+
+  return `
+    <section class="draft-pick">
+      <h3>Pack ${entry.pack}, Pick ${entry.pick} <span class="muted">(${entry.packCards.length} card${entry.packCards.length === 1 ? "" : "s"})</span></h3>
+      <ul class="card-list draft-card-list">
+        ${entry.packCards.map((c) => draftPickCardHtml(c, c.cardId === entry.pickedCardId)).join("")}
+      </ul>
+      <p class="muted wheel-line">${wheelLine}</p>
+    </section>`;
+}
+
+function draftTabHtml(picks: DraftViewerPick[]): string {
+  if (picks.length === 0) {
+    return `<p class="muted">No draft pick data captured for this run.</p>`;
+  }
+  return `<div class="draft-picks">${picks.map(draftPickHtml).join("")}</div>`;
+}
+
 export function generateDeckViewerHtml(data: DeckViewerData): string {
   const { wins, losses, total, pct } = data.winRate;
   const recordLine = total > 0 ? `${wins}-${losses} (${pct} over ${total} decided match${total === 1 ? "" : "es"})` : `${wins}-${losses} (no decided matches yet)`;
@@ -152,13 +194,8 @@ export function generateDeckViewerHtml(data: DeckViewerData): string {
   .card-row:hover, .card-row:focus { background: #22232c; outline: none; }
   .card-row:hover .preview, .card-row:focus .preview { display: block; }
   .qty { color: #8a8d99; width: 2.2em; text-align: right; flex-shrink: 0; }
-  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-  .dot-W { background: #f8f6d8; } .dot-U { background: #4fa8e0; } .dot-B { background: #6b6b76; }
-  .dot-R { background: #e05a4f; } .dot-G { background: #4fae6a; } .dot-C { background: #55586b; }
   .name { flex: 1; }
-  .preview { display: none; position: absolute; left: 100%; top: 0; z-index: 10; margin-left: 12px; background: #1c1d24; border: 1px solid #3a3c48; border-radius: 8px; padding: 8px; width: 260px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
-  .preview img { width: 100%; border-radius: 6px; display: block; }
-  .preview-text { font-size: 0.85rem; line-height: 1.4; }
+  ${CARD_PREVIEW_CSS}
   .curve-chart { display: flex; align-items: flex-end; gap: 12px; height: 220px; margin: 16px 0; }
   .curve-bar-wrap { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; flex: 1; height: 100%; }
   .curve-bar { width: 100%; max-width: 48px; background: #4fa8e0; border-radius: 4px 4px 0 0; display: flex; flex-direction: column; justify-content: flex-end; min-height: 2px; }
@@ -169,7 +206,13 @@ export function generateDeckViewerHtml(data: DeckViewerData): string {
   .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; }
   .swatch-creature { background: #4fae6a; }
   .swatch-noncreature { background: #4fa8e0; }
-  code { background: #22232c; padding: 1px 5px; border-radius: 4px; }
+  .draft-picks { display: flex; flex-direction: column; gap: 20px; }
+  .draft-pick { border-bottom: 1px solid #2a2c36; padding-bottom: 14px; }
+  .draft-card-list { display: flex; flex-wrap: wrap; gap: 2px 18px; }
+  .draft-card-row { width: 220px; }
+  .draft-card-row.picked .name { color: #6fd57a; font-weight: 600; }
+  .picked-badge { color: #6fd57a; flex-shrink: 0; }
+  .wheel-line { margin-top: 6px; }
 </style>
 </head>
 <body>
@@ -180,27 +223,34 @@ export function generateDeckViewerHtml(data: DeckViewerData): string {
   </div>
 
   <div class="tabs">
-    <button id="tab-list" class="active" onclick="showView('list')">Deck list</button>
-    <button id="tab-curve" onclick="showView('curve')">Curve</button>
+    <button class="tab-btn active" data-view="list" onclick="showView('list')">Deck list</button>
+    <button class="tab-btn" data-view="curve" onclick="showView('curve')">Curve</button>
+    ${data.draft.length > 0 ? `<button class="tab-btn" data-view="draft" onclick="showView('draft')">Draft</button>` : ""}
   </div>
 
-  <div id="view-list" class="view active">
+  <div id="view-list" class="view active" data-view="list">
     <div class="deck-columns">
       ${deckListHtml("Maindeck", data.mainDeck)}
       ${deckListHtml("Sideboard", data.sideboard)}
     </div>
   </div>
 
-  <div id="view-curve" class="view">
+  <div id="view-curve" class="view" data-view="curve">
     ${curveHtml(data.mainDeck)}
   </div>
 
+  ${
+    data.draft.length > 0
+      ? `<div id="view-draft" class="view" data-view="draft">
+    ${draftTabHtml(data.draft)}
+  </div>`
+      : ""
+  }
+
   <script>
     function showView(name) {
-      document.getElementById('view-list').classList.toggle('active', name === 'list');
-      document.getElementById('view-curve').classList.toggle('active', name === 'curve');
-      document.getElementById('tab-list').classList.toggle('active', name === 'list');
-      document.getElementById('tab-curve').classList.toggle('active', name === 'curve');
+      document.querySelectorAll('.view').forEach(function (el) { el.classList.toggle('active', el.dataset.view === name); });
+      document.querySelectorAll('.tab-btn').forEach(function (el) { el.classList.toggle('active', el.dataset.view === name); });
     }
   </script>
 </body>

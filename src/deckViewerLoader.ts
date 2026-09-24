@@ -4,7 +4,8 @@ import type { EnrichedCard } from "./cards/types.js";
 import { buildEventRunHistory, listEventRuns } from "./domain/eventHistory.js";
 import { loadEventHistorySource } from "./eventHistoryLoader.js";
 import { deriveDeckColors } from "./domain/deckColors.js";
-import type { DeckViewerData, ViewerCard } from "./deckViewerHtml.js";
+import { attributeDraftWheel } from "./domain/draftWheel.js";
+import type { DeckViewerData, DraftViewerPick, DraftViewerPickCard, ViewerCard } from "./deckViewerHtml.js";
 
 /**
  * Thin loader between tracker.db/the cards table and the pure
@@ -49,6 +50,25 @@ export function buildDeckViewerData(eventId: string, store: TypedEventStore, car
   const sideboard = toViewerCards(history.deck?.sideboard ?? null);
   const colorCombo = history.deck ? deriveDeckColors(history.deck.mainDeck, cardColors).comboKey : "(no deck captured)";
 
+  const toDraftCard = (cardId: number): DraftViewerPickCard => {
+    const c = cardsById.get(cardId);
+    return {
+      cardId,
+      name: c?.name ?? `Unknown card #${cardId} (run npm run refresh-cards)`,
+      colors: c?.colors ?? [],
+      oracleText: c?.oracleText ?? null,
+      imageNormal: c?.imageNormal ?? null,
+    };
+  };
+  const draft: DraftViewerPick[] = attributeDraftWheel(history.picks, history.packsSeen).map((a) => ({
+    pack: a.pack,
+    pick: a.pick,
+    packCards: a.packCards.map(toDraftCard),
+    pickedCardId: a.grpId,
+    wheeledAt: a.wheel.wheeledAt,
+    takenByOthers: a.wheel.takenByOthers.map(toDraftCard),
+  }));
+
   return {
     eventId: history.eventId,
     format: history.identity.format,
@@ -58,5 +78,6 @@ export function buildDeckViewerData(eventId: string, store: TypedEventStore, car
     winRate: history.winRate,
     mainDeck,
     sideboard,
+    draft,
   };
 }

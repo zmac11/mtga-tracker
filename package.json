@@ -15,12 +15,16 @@
     "test:jsonstream": "tsx src/cards/jsonArrayStream.test.ts",
     "test:tailer": "tsx src/log/logTailer.test.ts",
     "test:scryfall": "tsx src/cards/scryfallEnrich.test.ts",
-    "test": "npm run test:parser && npm run test:classifier && npm run test:livestate && npm run test:jsonstream && npm run test:tailer && npm run test:scryfall",
+    "test:draftprogress": "tsx src/draftProgressHtml.test.ts",
+    "test:draftwheel": "tsx src/domain/draftWheel.test.ts",
+    "test:deckviewer": "tsx src/deckViewerHtml.test.ts",
+    "test": "npm run test:parser && npm run test:classifier && npm run test:livestate && npm run test:jsonstream && npm run test:tailer && npm run test:scryfall && npm run test:draftprogress && npm run test:draftwheel && npm run test:deckviewer",
     "backfill": "tsx src/backfill.ts",
     "report": "tsx src/report.ts",
     "overlay": "npm run build && electron .",
     "refresh-cards": "tsx src/refreshCards.ts",
-    "deck-viewer": "tsx src/generateDeckViewer.ts"
+    "deck-viewer": "tsx src/generateDeckViewer.ts",
+    "draft-progress": "tsx src/generateDraftProgress.ts"
   },
   "dependencies": {
     "chokidar": "^3.6.0"

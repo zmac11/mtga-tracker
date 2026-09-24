@@ -8,6 +8,8 @@ import { TypedEventStore } from "../db/sqliteStore.js";
 import { CardStore } from "../cards/cardStore.js";
 import { buildDeckViewerData } from "../deckViewerLoader.js";
 import { generateDeckViewerHtml } from "../deckViewerHtml.js";
+import { buildDraftProgressData } from "../draftProgressLoader.js";
+import { generateDraftProgressHtml, generateNoDraftInProgressHtml } from "../draftProgressHtml.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -225,6 +227,41 @@ app.whenReady().then(() => {
     }
   });
 
+  // Milestone 7 phase 5: "live draft progress" page. See draftProgressHtml.ts's
+  // top comment for why this is a static file that gets rewritten on every
+  // relevant event rather than served live - short version: this project
+  // deliberately has no local HTTP server (see phase 4's notes), so the page
+  // auto-refreshes itself and this is what keeps its content fresh for it to
+  // pick up. Always writes something (a real snapshot, or the "no draft in
+  // progress" placeholder) so a tab left open never shows stale, already-
+  // finished pack contents as if they were still current.
+  const draftProgressPath = join(pipeline.dataDir, "draft-progress", "live.html");
+  const regenerateDraftProgressPage = () => {
+    try {
+      mkdirSync(join(pipeline.dataDir, "draft-progress"), { recursive: true });
+      const currentDraft = liveState.snapshot().currentDraft;
+      if (!currentDraft) {
+        writeFileSync(draftProgressPath, generateNoDraftInProgressHtml(), "utf8");
+        return;
+      }
+      const cardStore = new CardStore(join(pipeline.dataDir, "tracker.db"));
+      try {
+        const data = buildDraftProgressData(currentDraft, cardStore);
+        writeFileSync(draftProgressPath, generateDraftProgressHtml(data), "utf8");
+      } finally {
+        cardStore.close();
+      }
+    } catch (err) {
+      console.error("Failed to regenerate draft-progress page:", err);
+    }
+  };
+
+  ipcMain.handle("open-draft-progress", () => {
+    regenerateDraftProgressPage();
+    shell.openPath(draftProgressPath);
+    return { ok: true };
+  });
+
   const sendSnapshot = () => {
     mainWindow?.webContents.send("state", {
       foundLog: pipeline.located.found,
@@ -240,6 +277,12 @@ app.whenReady().then(() => {
     pipeline.on("domainEvent", (event) => {
       liveState.record(event);
       sendSnapshot();
+      // Only these three kinds can change what the draft-progress page
+      // should show (see LiveStateTracker.record) - no point re-reading the
+      // ~27k-row card catalog on every unrelated match/game-state event.
+      if (event.kind === "DraftPackSeen" || event.kind === "DraftPickMade" || event.kind === "DraftCompleted") {
+        regenerateDraftProgressPage();
+      }
     });
     pipeline.on("error", (err) => console.error("Tailer error:", err));
     pipeline.start();

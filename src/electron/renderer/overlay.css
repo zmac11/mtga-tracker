@@ -117,7 +117,8 @@ body.interactive .panel {
   color: #ff8a80;
 }
 
-.event-record {
+.event-record,
+.draft-progress {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
@@ -130,9 +131,17 @@ body.interactive .panel {
 /* Only looks/acts clickable once unlocked (Cmd/Ctrl+Shift+O) - matches the
    drag-handle's same interactive-only affordance above, and clicks don't
    reach this element at all while click-through/locked anyway. */
-body.interactive .event-record:hover {
+body.interactive .event-record:hover,
+body.interactive .draft-progress:hover {
   cursor: pointer;
   color: rgba(255, 255, 255, 0.95);
+}
+
+.draft-progress {
+  /* A distinct accent color (vs. the event record's plain white) so it
+     reads at a glance as "something's actively happening" while a draft is
+     in progress - milestone 7 phase 5. */
+  color: rgba(160, 190, 255, 0.85);
 }
 
 .event-name {

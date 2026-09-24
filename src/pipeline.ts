@@ -100,7 +100,10 @@ export class CapturePipeline extends EventEmitter {
    * event's already-known record until something new happens to re-report
    * it. Deliberately excludes GameStateSnapshot/PlayerIdentified (not
    * needed for rollups) and doesn't attempt overall chronological ordering
-   * across kinds - seedHistory doesn't need it (see its own comment).
+   * across kinds - seedHistory doesn't need it (see its own comment). As of
+   * milestone 7 phase 5, also includes the draft pack/pick/completion kinds
+   * so a still-in-progress draft resumes showing live progress after a
+   * relaunch too, not just match/event win-rate history.
    */
   historyForSeeding(): DomainEvent[] {
     return [
@@ -108,6 +111,9 @@ export class CapturePipeline extends EventEmitter {
       ...this.typedStore.all("MatchCompleted"),
       ...this.typedStore.all("DeckSubmitted"),
       ...this.typedStore.all("CourseStanding"),
+      ...this.typedStore.all("DraftPackSeen"),
+      ...this.typedStore.all("DraftPickMade"),
+      ...this.typedStore.all("DraftCompleted"),
     ];
   }
 

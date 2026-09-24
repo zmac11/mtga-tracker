@@ -10,3 +10,4 @@ samples/*.json
 *.mtga
 data/cards-cache/
 data/deck-viewer/
+data/draft-progress/
