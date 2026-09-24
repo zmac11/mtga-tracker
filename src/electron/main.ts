@@ -1,4 +1,4 @@
-import { app, BrowserWindow, globalShortcut, ipcMain, Menu, nativeImage, screen, shell, Tray } from "electron";
+import { app, BrowserWindow, globalShortcut, ipcMain, Menu, nativeImage, Notification, screen, shell, Tray } from "electron";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -6,6 +6,9 @@ import { CapturePipeline } from "../pipeline.js";
 import { LiveStateTracker } from "../domain/liveState.js";
 import { TypedEventStore } from "../db/sqliteStore.js";
 import { CardStore } from "../cards/cardStore.js";
+import { locateCardDatabase } from "../cards/cardDbLocator.js";
+import { extractArenaCards } from "../cards/extractArenaCards.js";
+import { enrichCards } from "../cards/scryfallEnrich.js";
 import { buildDeckViewerData } from "../deckViewerLoader.js";
 import { generateDeckViewerHtml } from "../deckViewerHtml.js";
 import { buildDraftProgressData } from "../draftProgressLoader.js";
@@ -26,6 +29,17 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
  * temporarily so you can drag it to a better spot by its top handle.
  * Position is remembered across runs in a small JSON file under Electron's
  * userData directory.
+ *
+ * Milestone 8+ (2026-09-24): the tray menu also exposes "Refresh Card
+ * Database" - a button version of `npm run refresh-cards` (see
+ * refreshCards.ts), so the card catalog (names/images/oracle text the
+ * deck viewer and draft-progress pages resolve grpIds against) can be kept
+ * current after an Arena patch/new set without needing a terminal at all.
+ * Runs the exact same pipeline (locate Arena's Raw_CardDatabase_*.mtga ->
+ * extract -> enrich from Scryfall -> upsert into tracker.db) inline in the
+ * main process rather than shelling out to the CLI script, so it works the
+ * same whether or not the user has Node/npm set up separately from the
+ * packaged app.
  */
 
 function parseArgs(argv: string[]) {
@@ -65,10 +79,68 @@ function savePosition(x: number, y: number): void {
   }
 }
 
+/**
+ * Milestone 8+: remembers the outcome of the last card-database refresh
+ * (whichever session ran it) across relaunches, the same "small JSON file
+ * under userData" pattern as the overlay position above - so the tray menu
+ * can show "Cards refreshed <when>: <summary>" immediately on startup
+ * rather than going blank until the user clicks refresh again.
+ */
+interface CardRefreshStatus {
+  at: string; // ISO timestamp
+  summary: string;
+}
+
+function cardRefreshStatusPath(): string {
+  const dir = app.getPath("userData");
+  mkdirSync(dir, { recursive: true });
+  return join(dir, "card-refresh-status.json");
+}
+
+function loadCardRefreshStatus(): CardRefreshStatus | null {
+  try {
+    const raw = readFileSync(cardRefreshStatusPath(), "utf8");
+    const parsed = JSON.parse(raw);
+    if (typeof parsed.at === "string" && typeof parsed.summary === "string") return parsed;
+  } catch {
+    // No refresh recorded yet, or the file's unreadable/corrupt.
+  }
+  return null;
+}
+
+function saveCardRefreshStatus(status: CardRefreshStatus): void {
+  try {
+    writeFileSync(cardRefreshStatusPath(), JSON.stringify(status), "utf8");
+  } catch {
+    // Best-effort - losing the remembered status isn't worth crashing over.
+  }
+}
+
+function notifyCardRefresh(summary: string): void {
+  try {
+    if (Notification.isSupported()) new Notification({ title: "MTGA Tracker", body: summary }).show();
+  } catch {
+    // Notifications are a nice-to-have - the tray label and status file already carry this info either way.
+  }
+}
+
+function formatLastCardRefreshLabel(status: CardRefreshStatus | null): string {
+  if (!status) return "Cards: not refreshed yet";
+  return `Cards refreshed ${new Date(status.at).toLocaleString()}: ${status.summary}`;
+}
+
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let interactive = false; // false = click-through (default)
 let watchingStatus = "Starting...";
+let refreshingCards = false;
+let cardRefreshStatus: CardRefreshStatus | null = null;
+// Set once the pipeline (and therefore its dataDir) exists, inside
+// app.whenReady() below - kept as a module-level slot (rather than a
+// closure captured directly by the tray's click handlers) so
+// rebuildTrayMenu() can stay a plain top-level function like the rest of
+// this file's UI wiring.
+let runCardRefresh: ((skipEnrich: boolean) => void) | null = null;
 
 function createWindow(): BrowserWindow {
   const display = screen.getPrimaryDisplay();
@@ -132,12 +204,15 @@ function toggleStartAtLogin(): void {
 
 /**
  * Rebuilt (rather than mutated in place) every time something it reflects
- * changes - watching status, interactive/click-through state, or the login
- * item setting - since Electron's Menu items don't update reactively once
- * built. This is also, for now, the entire "settings menu": there's only
- * one real toggle (start at login) plus the drag-unlock convenience, so a
- * separate settings window would be more chrome than substance. Revisit if
- * more settings accumulate.
+ * changes - watching status, interactive/click-through state, the login
+ * item setting, or a card refresh starting/finishing - since Electron's
+ * Menu items don't update reactively once built. This tray menu is still
+ * the entire "settings" surface for the app (see the file header for why a
+ * dedicated settings window hasn't been built) - the card-refresh section
+ * added here (milestone 8+) is exactly the kind of thing that was flagged
+ * as a candidate for that if settings kept accumulating; three toggle-ish
+ * items plus a status line is still comfortably tray-menu-sized, but a
+ * proper settings window is worth reconsidering if more gets added.
  */
 function rebuildTrayMenu(): void {
   if (!tray) return;
@@ -156,6 +231,18 @@ function rebuildTrayMenu(): void {
       checked: interactive,
       accelerator: "CommandOrControl+Shift+O",
       click: toggleInteractive,
+    },
+    { type: "separator" },
+    { label: formatLastCardRefreshLabel(cardRefreshStatus), enabled: false },
+    {
+      label: refreshingCards ? "Refreshing Cards..." : "Refresh Card Database",
+      enabled: !refreshingCards,
+      click: () => runCardRefresh?.(false),
+    },
+    {
+      label: "Refresh Cards (Arena data only, no internet)",
+      enabled: !refreshingCards,
+      click: () => runCardRefresh?.(true),
     },
     { type: "separator" },
     { label: "Quit MTGA Tracker", accelerator: "CommandOrControl+Shift+Q", click: () => app.quit() },
@@ -189,6 +276,71 @@ app.whenReady().then(() => {
   // correct data was already sitting in tracker.db. See
   // LiveStateTracker.seedHistory's comment for the bug this fixes.
   liveState.seedHistory(pipeline.historyForSeeding());
+
+  // Milestone 8+: pick up whatever the last card refresh (from this run or
+  // an earlier one) reported, so the tray shows real info immediately
+  // rather than "not refreshed yet" until the user clicks the button once.
+  cardRefreshStatus = loadCardRefreshStatus();
+
+  // Milestone 8+: "Refresh Card Database" tray action - the exact same
+  // steps as `npm run refresh-cards` (see refreshCards.ts's own comment for
+  // the full rationale), just run inline here and reported via a native
+  // notification plus the persisted status line above instead of console
+  // output, since there's no terminal to read here. Only one refresh runs
+  // at a time (a second click while one's in flight is a no-op, and the
+  // menu item is disabled/relabeled while running so this is also visible,
+  // not just silently ignored).
+  runCardRefresh = async (skipEnrich: boolean) => {
+    if (refreshingCards) return;
+    refreshingCards = true;
+    rebuildTrayMenu();
+
+    let store: CardStore | null = null;
+    try {
+      const located = locateCardDatabase();
+      if (!located.found || !located.path) {
+        throw new Error("Could not find Arena's card database - make sure MTG Arena is installed and has been run at least once.");
+      }
+      const arenaCards = extractArenaCards(located.path);
+      store = new CardStore(join(pipeline.dataDir, "tracker.db"));
+
+      if (skipEnrich) {
+        store.syncArenaData(arenaCards);
+        const summary = `Synced ${arenaCards.length} cards from Arena (Scryfall lookup skipped).`;
+        cardRefreshStatus = { at: new Date().toISOString(), summary };
+        saveCardRefreshStatus(cardRefreshStatus);
+        notifyCardRefresh(summary);
+        return;
+      }
+
+      try {
+        const { matchedCount, cards, downloaded } = await enrichCards(arenaCards, { dataDir: pipeline.dataDir });
+        store.upsertMany(cards);
+        const summary = `Synced ${arenaCards.length} cards, ${matchedCount} enriched from Scryfall (${downloaded ? "fresh download" : "cached data"}).`;
+        cardRefreshStatus = { at: new Date().toISOString(), summary };
+        saveCardRefreshStatus(cardRefreshStatus);
+        notifyCardRefresh(summary);
+      } catch (err) {
+        // Same fallback as the CLI: if Scryfall is unreachable or errors,
+        // still sync the Arena-side data (new set/rebalance names, at
+        // least) rather than leaving the whole refresh empty-handed.
+        store.syncArenaData(arenaCards);
+        const reason = err instanceof Error ? err.message : String(err);
+        const summary = `Synced ${arenaCards.length} cards from Arena; Scryfall enrichment failed (${reason}).`;
+        cardRefreshStatus = { at: new Date().toISOString(), summary };
+        saveCardRefreshStatus(cardRefreshStatus);
+        notifyCardRefresh(summary);
+      }
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      console.error("Card refresh failed:", err);
+      notifyCardRefresh(`Card refresh failed: ${reason}`);
+    } finally {
+      store?.close();
+      refreshingCards = false;
+      rebuildTrayMenu();
+    }
+  };
 
   // Milestone 7 phase 4: "click the current event to view its deck" - opens
   // a generated static HTML page (data/deck-viewer/<eventId>.html) in the
@@ -299,7 +451,7 @@ app.whenReady().then(() => {
   globalShortcut.register("CommandOrControl+Shift+Q", () => app.quit());
 
   console.log(watchingStatus);
-  console.log("Cmd/Ctrl+Shift+O: unlock to drag the overlay.  Cmd/Ctrl+Shift+Q: quit.  Or use the tray icon's menu for both, plus Start at Login.");
+  console.log("Cmd/Ctrl+Shift+O: unlock to drag the overlay.  Cmd/Ctrl+Shift+Q: quit.  Or use the tray icon's menu for both, plus Start at Login and Refresh Card Database.");
 
   app.on("will-quit", () => {
     globalShortcut.unregisterAll();
