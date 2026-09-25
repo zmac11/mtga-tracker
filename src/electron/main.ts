@@ -52,6 +52,16 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
  * under userData" pattern as the remembered window position) and apply
  * live to the running overlay the instant they change - see
  * applyOverlaySettings() below.
+ *
+ * Milestone 11 (2026-09-25): a "Hide Overlay" tray item + Cmd/Ctrl+Shift+H
+ * shortcut that shows/hides the whole overlay window outright - separate
+ * from (and independent of) the click-through/drag "Unlock Overlay"
+ * toggle above, which only ever affects whether the window *receives mouse
+ * events*, not whether it's visible at all. Deliberately session-scoped,
+ * not persisted to disk - like the click-through toggle, it resets to
+ * "visible" on every relaunch, so the overlay never silently fails to
+ * appear because of a hide from a previous session the user forgot about.
+ * See toggleOverlayHidden() below.
  */
 
 function parseArgs(argv: string[]) {
@@ -201,6 +211,7 @@ let mainWindow: BrowserWindow | null = null;
 let settingsWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let interactive = false; // false = click-through (default)
+let overlayHidden = false; // milestone 11: whole-window show/hide, independent of click-through
 let watchingStatus = "Starting...";
 let refreshingCards = false;
 let cardRefreshStatus: CardRefreshStatus | null = null;
@@ -286,6 +297,26 @@ function toggleInteractive(): void {
   rebuildTrayMenu();
 }
 
+/**
+ * Milestone 11: shows/hides the overlay window outright - unrelated to
+ * toggleInteractive() above, which only ever changes whether the window
+ * *receives mouse events*; a click-through overlay is still fully visible.
+ * Hiding here uses BrowserWindow.hide()/show() rather than tearing the
+ * window down, so the capture pipeline, remembered position, and current
+ * size/opacity settings are all completely unaffected - showing it again
+ * just makes the exact same window reappear where it was.
+ */
+function toggleOverlayHidden(): void {
+  if (!mainWindow) return;
+  overlayHidden = !overlayHidden;
+  if (overlayHidden) {
+    mainWindow.hide();
+  } else {
+    mainWindow.show();
+  }
+  rebuildTrayMenu();
+}
+
 function toggleStartAtLogin(): void {
   // openAtLogin is read back from macOS itself (via Electron) rather than
   // stored in our own settings file - it's the OS's own state (also visible
@@ -357,6 +388,13 @@ function rebuildTrayMenu(): void {
       checked: interactive,
       accelerator: "CommandOrControl+Shift+O",
       click: toggleInteractive,
+    },
+    {
+      label: "Hide Overlay",
+      type: "checkbox",
+      checked: overlayHidden,
+      accelerator: "CommandOrControl+Shift+H",
+      click: toggleOverlayHidden,
     },
     { label: "Overlay Settings... (size, transparency)", click: openSettingsWindow },
     { type: "separator" },
@@ -612,13 +650,15 @@ app.whenReady().then(() => {
   rebuildTrayMenu();
 
   globalShortcut.register("CommandOrControl+Shift+O", toggleInteractive);
+  // Milestone 11: show/hide the whole overlay window, independent of the unlock/drag toggle above.
+  globalShortcut.register("CommandOrControl+Shift+H", toggleOverlayHidden);
   // Quit shortcut since this app deliberately has no dock icon/menu bar to quit from otherwise
   // (also available from the tray menu).
   globalShortcut.register("CommandOrControl+Shift+Q", () => app.quit());
 
   console.log(watchingStatus);
   console.log(
-    "Cmd/Ctrl+Shift+O: unlock to drag the overlay.  Cmd/Ctrl+Shift+Q: quit.  Or use the tray icon's menu for both, plus Start at Login, Overlay Settings (size/transparency), and Refresh Card Database.",
+    "Cmd/Ctrl+Shift+O: unlock to drag the overlay.  Cmd/Ctrl+Shift+H: hide/show the overlay.  Cmd/Ctrl+Shift+Q: quit.  Or use the tray icon's menu for all of these, plus Start at Login, Overlay Settings (size/transparency), and Refresh Card Database.",
   );
 
   app.on("will-quit", () => {
