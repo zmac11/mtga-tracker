@@ -124,9 +124,28 @@ const DEFAULT_OPACITY = 0.72; // matches the panel's original hardcoded backgrou
 const MIN_OPACITY = 0.2;
 const MAX_OPACITY = 1;
 
+/**
+ * Milestone 13: card-thumbnail size for the deck viewer's "Visual" tab
+ * (see deckViewerHtml.ts's DEFAULT_CARD_IMAGE_WIDTH_PX, which "medium"
+ * matches exactly, so nobody sees any change unless they open Settings -
+ * same "existing default stays default" convention as SIZE_PRESETS above).
+ * Unlike the overlay's own size/opacity, this has nothing to "apply live" to
+ * - the deck viewer is a static page regenerated fresh every time it's
+ * opened (see open-deck-viewer below), so changing this just changes what
+ * the *next* generated page uses.
+ */
+const CARD_SIZE_PRESETS: Record<string, { label: string; widthPx: number }> = {
+  small: { label: "Small", widthPx: 90 },
+  medium: { label: "Medium (default)", widthPx: 130 },
+  large: { label: "Large", widthPx: 170 },
+  xlarge: { label: "Extra Large", widthPx: 210 },
+};
+const DEFAULT_CARD_SIZE_PRESET = "medium";
+
 interface OverlaySettings {
   sizePreset: string; // a key of SIZE_PRESETS
   opacity: number; // MIN_OPACITY..MAX_OPACITY
+  cardSizePreset: string; // a key of CARD_SIZE_PRESETS - milestone 13
 }
 
 function overlaySettingsPath(): string {
@@ -142,10 +161,12 @@ function loadOverlaySettings(): OverlaySettings {
     const sizePreset = typeof parsed.sizePreset === "string" && parsed.sizePreset in SIZE_PRESETS ? parsed.sizePreset : DEFAULT_SIZE_PRESET;
     const opacity =
       typeof parsed.opacity === "number" && parsed.opacity >= MIN_OPACITY && parsed.opacity <= MAX_OPACITY ? parsed.opacity : DEFAULT_OPACITY;
-    return { sizePreset, opacity };
+    const cardSizePreset =
+      typeof parsed.cardSizePreset === "string" && parsed.cardSizePreset in CARD_SIZE_PRESETS ? parsed.cardSizePreset : DEFAULT_CARD_SIZE_PRESET;
+    return { sizePreset, opacity, cardSizePreset };
   } catch {
     // No settings saved yet, or the file's unreadable/corrupt - fall back to the original look.
-    return { sizePreset: DEFAULT_SIZE_PRESET, opacity: DEFAULT_OPACITY };
+    return { sizePreset: DEFAULT_SIZE_PRESET, opacity: DEFAULT_OPACITY, cardSizePreset: DEFAULT_CARD_SIZE_PRESET };
   }
 }
 
@@ -215,7 +236,7 @@ let overlayHidden = false; // milestone 11: whole-window show/hide, independent 
 let watchingStatus = "Starting...";
 let refreshingCards = false;
 let cardRefreshStatus: CardRefreshStatus | null = null;
-let overlaySettings: OverlaySettings = { sizePreset: DEFAULT_SIZE_PRESET, opacity: DEFAULT_OPACITY };
+let overlaySettings: OverlaySettings = { sizePreset: DEFAULT_SIZE_PRESET, opacity: DEFAULT_OPACITY, cardSizePreset: DEFAULT_CARD_SIZE_PRESET };
 // Set once the pipeline (and therefore its dataDir) exists, inside
 // app.whenReady() below - kept as a module-level slot (rather than a
 // closure captured directly by the tray's click handlers) so
@@ -341,8 +362,8 @@ function openSettingsWindow(): void {
     return;
   }
   settingsWindow = new BrowserWindow({
-    width: 320,
-    height: 260,
+    width: 340,
+    height: 420,
     resizable: false,
     minimizable: false,
     maximizable: false,
@@ -396,7 +417,7 @@ function rebuildTrayMenu(): void {
       accelerator: "CommandOrControl+Shift+H",
       click: toggleOverlayHidden,
     },
-    { label: "Overlay Settings... (size, transparency)", click: openSettingsWindow },
+    { label: "Overlay Settings... (size, transparency, card size)", click: openSettingsWindow },
     { type: "separator" },
     { label: formatLastCardRefreshLabel(cardRefreshStatus), enabled: false },
     {
@@ -518,7 +539,22 @@ app.whenReady().then(() => {
     sizePreset: overlaySettings.sizePreset,
     opacity: overlaySettings.opacity,
     presets: Object.entries(SIZE_PRESETS).map(([key, preset]) => ({ key, label: preset.label })),
+    cardSizePreset: overlaySettings.cardSizePreset,
+    cardSizePresets: Object.entries(CARD_SIZE_PRESETS).map(([key, preset]) => ({ key, label: preset.label })),
   }));
+
+  // Milestone 13: persists the deck viewer's "Visual" tab card-thumbnail
+  // size choice. Nothing to push live (see CARD_SIZE_PRESETS's comment) -
+  // just updates overlaySettings/overlay-settings.json so the next
+  // open-deck-viewer call picks it up.
+  ipcMain.handle("set-card-size-preset", (_event, presetKey: unknown) => {
+    if (typeof presetKey !== "string" || !(presetKey in CARD_SIZE_PRESETS)) {
+      return { ok: false, reason: "Unknown card size preset." };
+    }
+    overlaySettings = { ...overlaySettings, cardSizePreset: presetKey };
+    saveOverlaySettings(overlaySettings);
+    return { ok: true, sizePreset: overlaySettings.sizePreset, opacity: overlaySettings.opacity, cardSizePreset: overlaySettings.cardSizePreset };
+  });
 
   ipcMain.handle("set-size-preset", (_event, presetKey: unknown) => {
     if (typeof presetKey !== "string" || !(presetKey in SIZE_PRESETS)) {
@@ -555,7 +591,8 @@ app.whenReady().then(() => {
     try {
       store = new TypedEventStore(dbPath);
       cardStore = new CardStore(dbPath);
-      const data = buildDeckViewerData(currentEventId, store, cardStore);
+      const cardImageWidthPx = (CARD_SIZE_PRESETS[overlaySettings.cardSizePreset] ?? CARD_SIZE_PRESETS[DEFAULT_CARD_SIZE_PRESET]).widthPx;
+      const data = buildDeckViewerData(currentEventId, store, cardStore, cardImageWidthPx);
       if (!data) return { ok: false, reason: `No deck/draft data captured yet for ${currentEventId}.` };
 
       const html = generateDeckViewerHtml(data);

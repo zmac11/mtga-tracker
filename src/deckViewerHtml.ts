@@ -1,4 +1,4 @@
-import { groupByManaCurve, type CardCurveInfo } from "./domain/manaCurve.js";
+import { groupByManaCurve, type CardCurveInfo, type CurveBucket } from "./domain/manaCurve.js";
 import { CARD_PREVIEW_CSS, cardPreviewInnerHtml, colorDotsHtml, escapeHtml } from "./htmlCardHelpers.js";
 
 /**
@@ -10,6 +10,22 @@ import { CARD_PREVIEW_CSS, cardPreviewInnerHtml, colorDotsHtml, escapeHtml } fro
  * generateDeckViewer.ts for the loader that builds this from tracker.db),
  * same convention as the rest of src/domain/ - keeps this testable without a
  * real database or a real browser.
+ *
+ * Milestone 13 (2026-09-28): added a "Visual" tab that lays the *maindeck*
+ * out like Arena's own deck-builder screen - card image thumbnails grouped
+ * into columns by mana cost, each unique card shown once with a quantity
+ * badge, reusing domain/manaCurve.ts's existing bucketing (same rules as the
+ * "Curve" tab, rather than a second set of bucketing logic) - plus a toggle
+ * that splits those columns into a "Creatures" group and an "Other spells"
+ * group with a visible gap between them. The sideboard deliberately keeps
+ * its existing text-list treatment (deckListHtml) - this visual layout is
+ * for the maindeck only. Lands get their own always-visible section below
+ * the mana-cost columns (unaffected by the creature/spell toggle, since
+ * "creature vs non-creature" isn't a meaningful split for lands), rather
+ * than being silently dropped from the view. Card thumbnail size comes from
+ * DeckViewerData.cardImageWidthPx (baked into the page as a CSS variable at
+ * generation time) - see the new "Card size" Settings section in
+ * electron/main.ts for where that value is chosen and persisted.
  */
 
 export interface ViewerCard {
@@ -63,7 +79,12 @@ export interface DeckViewerData {
   sideboard: ViewerCard[] | null;
   /** Pick-by-pick draft data (milestone 7 phase 6) - empty when this run has no captured DraftPickMade/DraftPackSeen data (e.g. not a draft event, or nothing was captured), in which case the "Draft" tab isn't shown at all. */
   draft: DraftViewerPick[];
+  /** Milestone 13: card thumbnail width (px) for the "Visual" tab, from the Settings window's "Card size" choice. Defaults to DEFAULT_CARD_IMAGE_WIDTH_PX when omitted (e.g. in older callers/tests). */
+  cardImageWidthPx?: number;
 }
+
+/** Milestone 13: the "Visual" tab's default card-thumbnail width, used whenever DeckViewerData.cardImageWidthPx is omitted. Also the fallback main.ts's CARD_SIZE_PRESETS resolves to if the persisted setting is ever missing/invalid. */
+export const DEFAULT_CARD_IMAGE_WIDTH_PX = 130;
 
 function cardRowHtml(card: ViewerCard): string {
   return `
@@ -131,6 +152,93 @@ function curveHtml(mainDeck: ViewerCard[]): string {
     </section>`;
 }
 
+/** Milestone 13: an always-visible card thumbnail for the "Visual" tab - unlike cardRowHtml above, the image itself is the row (not a hover-only preview), with a quantity badge for stacks of more than one and a hover panel (reusing cardPreviewInnerHtml, same as every other card in this project) for the enlarged/fallback view. */
+function visualCardHtml(card: ViewerCard): string {
+  const badge = card.quantity > 1 ? `<span class="visual-card-qty">x${card.quantity}</span>` : "";
+  const inner = card.imageNormal
+    ? `<img src="${escapeHtml(card.imageNormal)}" alt="${escapeHtml(card.name)}">`
+    : `<div class="visual-card-placeholder">${colorDotsHtml(card.colors)}<span>${escapeHtml(card.name)}</span></div>`;
+  return `
+    <div class="visual-card" tabindex="0">
+      ${inner}
+      ${badge}
+      <div class="preview">${cardPreviewInnerHtml(card)}</div>
+    </div>`;
+}
+
+function visualColumnHtml(bucket: CurveBucket, cardsById: Map<number, ViewerCard>): string {
+  const cards = bucket.cardIds
+    .map((entry) => cardsById.get(entry.cardId))
+    .filter((c): c is ViewerCard => Boolean(c))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  if (cards.length === 0) return "";
+  return `
+    <div class="visual-column">
+      <div class="visual-column-header">${escapeHtml(bucket.label)}</div>
+      <div class="visual-column-cards">${cards.map(visualCardHtml).join("")}</div>
+    </div>`;
+}
+
+/**
+ * Buckets `entries` by mana cost (reusing domain/manaCurve.ts's
+ * groupByManaCurve - same rules the "Curve" tab already uses) and renders
+ * one column per non-empty bucket. Callers decide land vs. non-land by
+ * which subset of the maindeck they pass in (see visualHtml) - this
+ * function renders whatever bucket labels come out of that subset, so it
+ * works unchanged for the "Lands" section (whose only bucket IS "Land")
+ * and for the mana-cost columns (whose entries never contain a land, so
+ * "Land" never appears there either).
+ */
+function visualColumnsHtml(entries: ViewerCard[], cardInfo: Map<number, CardCurveInfo>, cardsById: Map<number, ViewerCard>): string {
+  const buckets = groupByManaCurve(
+    entries.map((c) => ({ cardId: c.cardId, quantity: c.quantity })),
+    cardInfo,
+  );
+  if (buckets.length === 0) return `<p class="muted">No cards.</p>`;
+  return `<div class="visual-columns">${buckets.map((b) => visualColumnHtml(b, cardsById)).join("")}</div>`;
+}
+
+function visualHtml(mainDeck: ViewerCard[]): string {
+  const cardInfo = new Map<number, CardCurveInfo>();
+  const cardsById = new Map<number, ViewerCard>();
+  for (const c of mainDeck) {
+    cardInfo.set(c.cardId, { types: c.types, manaCost: c.manaCost });
+    cardsById.set(c.cardId, c);
+  }
+
+  const lands = mainDeck.filter((c) => c.types.includes("Land"));
+  const nonLand = mainDeck.filter((c) => !c.types.includes("Land"));
+  const creatures = nonLand.filter((c) => c.types.includes("Creature"));
+  const nonCreatures = nonLand.filter((c) => !c.types.includes("Creature"));
+
+  const landsSection =
+    lands.length > 0
+      ? `<div class="visual-lands">
+          <div class="visual-group-title">Lands</div>
+          ${visualColumnsHtml(lands, cardInfo, cardsById)}
+        </div>`
+      : "";
+
+  return `
+    <section class="visual-section">
+      <div class="visual-toolbar">
+        <h2>Maindeck by mana cost <span class="muted">(spells only - lands shown separately below)</span></h2>
+        <button id="visual-separate-btn" class="toggle-btn" onclick="toggleVisualSeparate()">Separate creatures / spells</button>
+      </div>
+      <div id="visual-combined" class="visual-columns-wrap active">
+        ${visualColumnsHtml(nonLand, cardInfo, cardsById)}
+      </div>
+      <div id="visual-separated" class="visual-columns-wrap">
+        <div class="visual-group-title">Creatures</div>
+        ${visualColumnsHtml(creatures, cardInfo, cardsById)}
+        <div class="visual-group-gap"></div>
+        <div class="visual-group-title">Other spells</div>
+        ${visualColumnsHtml(nonCreatures, cardInfo, cardsById)}
+      </div>
+      ${landsSection}
+    </section>`;
+}
+
 function draftPickCardHtml(card: DraftViewerPickCard, isPick: boolean): string {
   return `
     <li class="card-row draft-card-row${isPick ? " picked" : ""}" tabindex="0">
@@ -174,6 +282,7 @@ function draftTabHtml(picks: DraftViewerPick[]): string {
 export function generateDeckViewerHtml(data: DeckViewerData): string {
   const { wins, losses, total, pct } = data.winRate;
   const recordLine = total > 0 ? `${wins}-${losses} (${pct} over ${total} decided match${total === 1 ? "" : "es"})` : `${wins}-${losses} (no decided matches yet)`;
+  const cardImageWidthPx = data.cardImageWidthPx ?? DEFAULT_CARD_IMAGE_WIDTH_PX;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -181,7 +290,7 @@ export function generateDeckViewerHtml(data: DeckViewerData): string {
 <meta charset="utf-8">
 <title>${escapeHtml(data.deckName ?? data.definitionLabel)} - MTGA Tracker</title>
 <style>
-  :root { color-scheme: dark; }
+  :root { color-scheme: dark; --card-img-width: ${cardImageWidthPx}px; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #14151a; color: #e8e8ec; margin: 0; padding: 24px; }
   h1 { font-size: 1.4rem; margin: 0 0 4px; }
   h2 { font-size: 1rem; margin: 0 0 8px; color: #cfd2dc; }
@@ -212,6 +321,23 @@ export function generateDeckViewerHtml(data: DeckViewerData): string {
   .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; }
   .swatch-creature { background: #4fae6a; }
   .swatch-noncreature { background: #4fa8e0; }
+  .visual-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+  .toggle-btn { background: #22232c; color: #e8e8ec; border: 1px solid #34364280; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.85rem; }
+  .toggle-btn.active { background: #3d4ee0; border-color: #3d4ee0; }
+  .visual-columns-wrap { display: none; }
+  .visual-columns-wrap.active { display: block; }
+  .visual-columns { display: flex; gap: 16px; align-items: flex-start; overflow-x: auto; padding-bottom: 8px; }
+  .visual-column { display: flex; flex-direction: column; gap: 8px; flex: 0 0 auto; width: var(--card-img-width); }
+  .visual-column-header { text-align: center; font-size: 0.8rem; color: #8a8d99; padding-bottom: 4px; border-bottom: 1px solid #2a2c36; }
+  .visual-column-cards { display: flex; flex-direction: column; gap: 8px; }
+  .visual-card { position: relative; }
+  .visual-card img { width: 100%; border-radius: 6px; display: block; }
+  .visual-card:hover .preview, .visual-card:focus .preview { display: block; }
+  .visual-card-placeholder { width: var(--card-img-width); aspect-ratio: 5 / 7; background: #22232c; border: 1px solid #34364280; border-radius: 6px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 6px; text-align: center; font-size: 0.7rem; }
+  .visual-card-qty { position: absolute; bottom: 4px; right: 4px; background: rgba(0,0,0,0.75); color: #fff; font-size: 0.7rem; font-weight: 600; padding: 1px 5px; border-radius: 4px; }
+  .visual-group-title { margin: 4px 0 8px; font-size: 0.9rem; color: #cfd2dc; font-weight: 600; }
+  .visual-group-gap { height: 28px; }
+  .visual-lands { margin-top: 20px; padding-top: 16px; border-top: 1px solid #2a2c36; }
   .draft-picks { display: flex; flex-direction: column; gap: 20px; }
   .draft-pick { border-bottom: 1px solid #2a2c36; padding-bottom: 14px; }
   .draft-card-list { display: flex; flex-wrap: wrap; gap: 2px 18px; }
@@ -230,6 +356,7 @@ export function generateDeckViewerHtml(data: DeckViewerData): string {
 
   <div class="tabs">
     <button class="tab-btn active" data-view="list" onclick="showView('list')">Deck list</button>
+    <button class="tab-btn" data-view="visual" onclick="showView('visual')">Visual</button>
     <button class="tab-btn" data-view="curve" onclick="showView('curve')">Curve</button>
     ${data.draft.length > 0 ? `<button class="tab-btn" data-view="draft" onclick="showView('draft')">Draft</button>` : ""}
   </div>
@@ -239,6 +366,10 @@ export function generateDeckViewerHtml(data: DeckViewerData): string {
       ${deckListHtml("Maindeck", data.mainDeck)}
       ${deckListHtml("Sideboard", data.sideboard)}
     </div>
+  </div>
+
+  <div id="view-visual" class="view" data-view="visual">
+    ${visualHtml(data.mainDeck)}
   </div>
 
   <div id="view-curve" class="view" data-view="curve">
@@ -257,6 +388,16 @@ export function generateDeckViewerHtml(data: DeckViewerData): string {
     function showView(name) {
       document.querySelectorAll('.view').forEach(function (el) { el.classList.toggle('active', el.dataset.view === name); });
       document.querySelectorAll('.tab-btn').forEach(function (el) { el.classList.toggle('active', el.dataset.view === name); });
+    }
+    function toggleVisualSeparate() {
+      var btn = document.getElementById('visual-separate-btn');
+      var combined = document.getElementById('visual-combined');
+      var separated = document.getElementById('visual-separated');
+      var nowSeparated = !separated.classList.contains('active');
+      combined.classList.toggle('active', !nowSeparated);
+      separated.classList.toggle('active', nowSeparated);
+      btn.classList.toggle('active', nowSeparated);
+      btn.textContent = nowSeparated ? 'Show combined' : 'Separate creatures / spells';
     }
   </script>
 </body>

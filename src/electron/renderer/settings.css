@@ -11,6 +11,11 @@ body {
   background: #1a1a1f;
   color: #fff;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  /* Milestone 13: a second radio-group section (card size) was added below
+     the original two - overflow-y:auto is a safety net in case a future
+     addition (or a smaller display) ever makes the content taller than the
+     window, rather than clipping it silently. */
+  overflow-y: auto;
 }
 
 body {

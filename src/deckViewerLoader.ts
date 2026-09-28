@@ -14,8 +14,16 @@ import type { DeckViewerData, DraftViewerPick, DraftViewerPickCard, ViewerCard }
  * card catalog (milestone 4/phase 3) to build the exact data shape the
  * deck-viewer page needs. Returns null if this eventId has no data captured
  * at all (see listEventRuns) rather than rendering an empty/misleading page.
+ *
+ * Milestone 13: `cardImageWidthPx` is the user's chosen "Card size" setting
+ * (see electron/main.ts's CARD_SIZE_PRESETS/get-overlay-settings) for the
+ * deck viewer's "Visual" tab - passed straight through into DeckViewerData
+ * so generateDeckViewerHtml can bake it into the page as a CSS variable.
+ * Optional (defaults to deckViewerHtml.ts's own DEFAULT_CARD_IMAGE_WIDTH_PX)
+ * so callers that don't care about card size - e.g. this file's own tests,
+ * if any are added later - don't need to pass it.
  */
-export function buildDeckViewerData(eventId: string, store: TypedEventStore, cardStore: CardStore): DeckViewerData | null {
+export function buildDeckViewerData(eventId: string, store: TypedEventStore, cardStore: CardStore, cardImageWidthPx?: number): DeckViewerData | null {
   const source = loadEventHistorySource(store);
   const knownRuns = listEventRuns(source);
   if (!knownRuns.some((r) => r.eventId === eventId)) return null;
@@ -79,5 +87,6 @@ export function buildDeckViewerData(eventId: string, store: TypedEventStore, car
     mainDeck,
     sideboard,
     draft,
+    ...(cardImageWidthPx !== undefined ? { cardImageWidthPx } : {}),
   };
 }

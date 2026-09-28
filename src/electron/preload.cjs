@@ -35,4 +35,6 @@ contextBridge.exposeInMainWorld("settingsApi", {
   getSettings: () => ipcRenderer.invoke("get-overlay-settings"),
   setSizePreset: (presetKey) => ipcRenderer.invoke("set-size-preset", presetKey),
   setOpacity: (opacity) => ipcRenderer.invoke("set-opacity", opacity),
+  // Milestone 13: deck viewer "Visual" tab card-thumbnail size.
+  setCardSizePreset: (presetKey) => ipcRenderer.invoke("set-card-size-preset", presetKey),
 });

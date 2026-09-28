@@ -7,6 +7,7 @@
 // renamed, or its dimensions change.
 
 const sizeOptionsEl = document.getElementById("size-options");
+const cardSizeOptionsEl = document.getElementById("card-size-options");
 const opacitySlider = document.getElementById("opacity-slider");
 const opacityValueEl = document.getElementById("opacity-value");
 const statusEl = document.getElementById("status");
@@ -20,21 +21,25 @@ function showStatus(text) {
   }
 }
 
-function renderSizeOptions(presets, currentPreset) {
-  sizeOptionsEl.innerHTML = "";
+// Milestone 13: shared by the overlay-size group and the new card-size
+// group below - each gets its own radio `name` (from the container's id) so
+// the two groups never interfere with each other, and its own onChange
+// callback so each posts to the right IPC handler.
+function renderRadioOptions(containerEl, presets, currentPreset, onChange, errorMessage) {
+  containerEl.innerHTML = "";
   for (const preset of presets) {
     const label = document.createElement("label");
     label.className = "size-option";
 
     const input = document.createElement("input");
     input.type = "radio";
-    input.name = "size-preset";
+    input.name = containerEl.id;
     input.value = preset.key;
     input.checked = preset.key === currentPreset;
     input.addEventListener("change", async () => {
-      const result = await window.settingsApi.setSizePreset(preset.key);
+      const result = await onChange(preset.key);
       if (!result || !result.ok) {
-        showStatus((result && result.reason) || "Could not change the overlay size.");
+        showStatus((result && result.reason) || errorMessage);
       }
     });
 
@@ -43,8 +48,22 @@ function renderSizeOptions(presets, currentPreset) {
 
     label.appendChild(input);
     label.appendChild(text);
-    sizeOptionsEl.appendChild(label);
+    containerEl.appendChild(label);
   }
+}
+
+function renderSizeOptions(presets, currentPreset) {
+  renderRadioOptions(sizeOptionsEl, presets, currentPreset, (key) => window.settingsApi.setSizePreset(key), "Could not change the overlay size.");
+}
+
+function renderCardSizeOptions(presets, currentPreset) {
+  renderRadioOptions(
+    cardSizeOptionsEl,
+    presets,
+    currentPreset,
+    (key) => window.settingsApi.setCardSizePreset(key),
+    "Could not change the card size.",
+  );
 }
 
 function setOpacitySlider(opacity) {
@@ -70,6 +89,7 @@ opacitySlider.addEventListener("change", async () => {
 async function init() {
   const settings = await window.settingsApi.getSettings();
   renderSizeOptions(settings.presets, settings.sizePreset);
+  renderCardSizeOptions(settings.cardSizePresets, settings.cardSizePreset);
   setOpacitySlider(settings.opacity);
 }
 
