@@ -12,20 +12,33 @@ import { CARD_PREVIEW_CSS, cardPreviewInnerHtml, colorDotsHtml, escapeHtml } fro
  * real database or a real browser.
  *
  * Milestone 13 (2026-09-28): added a "Visual" tab that lays the *maindeck*
- * out like Arena's own deck-builder screen - card image thumbnails grouped
- * into columns by mana cost, each unique card shown once with a quantity
- * badge, reusing domain/manaCurve.ts's existing bucketing (same rules as the
- * "Curve" tab, rather than a second set of bucketing logic) - plus a toggle
- * that splits those columns into a "Creatures" group and an "Other spells"
- * group with a visible gap between them. The sideboard deliberately keeps
+ * out like Arena's own deck-builder screen - one column per mana-cost
+ * bucket (reusing domain/manaCurve.ts's existing bucketing, same rules as
+ * the "Curve" tab, rather than a second set of bucketing logic), each
+ * holding a fanned, overlapping stack of real card-image thumbnails (only
+ * a sliver of each card shows except the last in its column; hovering a
+ * card lifts it above the rest of the stack to show it in full). Lands get
+ * their own column in that same row (not a separate section) rather than
+ * being silently dropped from the view. The sideboard deliberately keeps
  * its existing text-list treatment (deckListHtml) - this visual layout is
- * for the maindeck only. Lands get their own always-visible section below
- * the mana-cost columns (unaffected by the creature/spell toggle, since
- * "creature vs non-creature" isn't a meaningful split for lands), rather
- * than being silently dropped from the view. Card thumbnail size comes from
+ * for the maindeck only. Card thumbnail size comes from
  * DeckViewerData.cardImageWidthPx (baked into the page as a CSS variable at
- * generation time) - see the new "Card size" Settings section in
+ * generation time) - see the "Card size" Settings section in
  * electron/main.ts for where that value is chosen and persisted.
+ *
+ * Milestone 14 (2026-09-28): reworked per user feedback on the first cut of
+ * the Visual tab above - cards now overlap (fanned) instead of stacking
+ * with a gap between every card, lands moved from their own section into a
+ * plain extra column in the same row, and the creature/spell "Separate"
+ * toggle no longer swaps in a whole different sub-layout (two separately
+ * headed groups) - it now just opens a small gap at the creature/spell
+ * boundary *within* each column's stack, everything else identical. Each
+ * card carries a `data-role` ("creature"/"spell"/"land") and cards are
+ * always ordered creatures-then-spells within a column (both modes); the
+ * `.separated` toggle only changes the CSS margin on the one card
+ * immediately after that boundary (matched via the `[data-role=creature] +
+ * [data-role=spell]` adjacent-sibling selector - no JS reordering, no
+ * duplicated markup for the two modes).
  */
 
 export interface ViewerCard {
@@ -152,50 +165,58 @@ function curveHtml(mainDeck: ViewerCard[]): string {
     </section>`;
 }
 
-/** Milestone 13: an always-visible card thumbnail for the "Visual" tab - unlike cardRowHtml above, the image itself is the row (not a hover-only preview), with a quantity badge for stacks of more than one and a hover panel (reusing cardPreviewInnerHtml, same as every other card in this project) for the enlarged/fallback view. */
-function visualCardHtml(card: ViewerCard): string {
+/** Milestone 13/14: a card's role within its "Visual" tab column - drives both which sub-group it sorts into (creatures before spells, within a mana-cost column) and the `data-role` attribute the "Separate creatures / spells" toggle's CSS selector keys off (see visualColumnHtml/generateDeckViewerHtml's stylesheet). Lands never split by creature/spell (that distinction isn't meaningful for a land), so they're their own role, unaffected by the toggle either way. */
+type VisualCardRole = "creature" | "spell" | "land";
+
+/** Milestone 13/14: an always-visible card thumbnail for the "Visual" tab - unlike cardRowHtml above, the image itself is the row (not a hover-only preview), fanned into an overlapping stack by the CSS in generateDeckViewerHtml (each card's negative top margin, see `.visual-card`), with a quantity badge for stacks of more than one and a hover panel (reusing cardPreviewInnerHtml, same as every other card in this project) for the enlarged/fallback view. `data-role` is what the creature/spell "Separate" toggle's adjacent-sibling CSS selector matches against - see visualColumnHtml. */
+function visualCardHtml(card: ViewerCard, role: VisualCardRole): string {
   const badge = card.quantity > 1 ? `<span class="visual-card-qty">x${card.quantity}</span>` : "";
   const inner = card.imageNormal
     ? `<img src="${escapeHtml(card.imageNormal)}" alt="${escapeHtml(card.name)}">`
     : `<div class="visual-card-placeholder">${colorDotsHtml(card.colors)}<span>${escapeHtml(card.name)}</span></div>`;
   return `
-    <div class="visual-card" tabindex="0">
+    <div class="visual-card" data-role="${role}" tabindex="0">
       ${inner}
       ${badge}
       <div class="preview">${cardPreviewInnerHtml(card)}</div>
     </div>`;
 }
 
+/**
+ * Renders one mana-cost column (or the "Land" column - same function, no
+ * special-casing needed beyond skipping the creature/spell split for it,
+ * since a land's role is always "land"). Cards are always ordered
+ * creatures-then-spells within a non-land column (both toggle modes) -
+ * only the CSS margin at that boundary changes based on whether
+ * `.visual-section` has the `.separated` class (see generateDeckViewerHtml's
+ * stylesheet's `[data-role=creature] + [data-role=spell]` rule) - so
+ * "separating" never swaps in a different layout, just opens a small gap
+ * in the existing stack.
+ */
 function visualColumnHtml(bucket: CurveBucket, cardsById: Map<number, ViewerCard>): string {
   const cards = bucket.cardIds
     .map((entry) => cardsById.get(entry.cardId))
-    .filter((c): c is ViewerCard => Boolean(c))
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .filter((c): c is ViewerCard => Boolean(c));
   if (cards.length === 0) return "";
+
+  const byName = (a: ViewerCard, b: ViewerCard) => a.name.localeCompare(b.name);
+  let ordered: Array<{ card: ViewerCard; role: VisualCardRole }>;
+  if (bucket.label === "Land") {
+    ordered = [...cards].sort(byName).map((card) => ({ card, role: "land" as const }));
+  } else {
+    const creatures = cards.filter((c) => c.types.includes("Creature")).sort(byName);
+    const spells = cards.filter((c) => !c.types.includes("Creature")).sort(byName);
+    ordered = [
+      ...creatures.map((card) => ({ card, role: "creature" as const })),
+      ...spells.map((card) => ({ card, role: "spell" as const })),
+    ];
+  }
+
   return `
     <div class="visual-column">
       <div class="visual-column-header">${escapeHtml(bucket.label)}</div>
-      <div class="visual-column-cards">${cards.map(visualCardHtml).join("")}</div>
+      <div class="visual-column-cards">${ordered.map(({ card, role }) => visualCardHtml(card, role)).join("")}</div>
     </div>`;
-}
-
-/**
- * Buckets `entries` by mana cost (reusing domain/manaCurve.ts's
- * groupByManaCurve - same rules the "Curve" tab already uses) and renders
- * one column per non-empty bucket. Callers decide land vs. non-land by
- * which subset of the maindeck they pass in (see visualHtml) - this
- * function renders whatever bucket labels come out of that subset, so it
- * works unchanged for the "Lands" section (whose only bucket IS "Land")
- * and for the mana-cost columns (whose entries never contain a land, so
- * "Land" never appears there either).
- */
-function visualColumnsHtml(entries: ViewerCard[], cardInfo: Map<number, CardCurveInfo>, cardsById: Map<number, ViewerCard>): string {
-  const buckets = groupByManaCurve(
-    entries.map((c) => ({ cardId: c.cardId, quantity: c.quantity })),
-    cardInfo,
-  );
-  if (buckets.length === 0) return `<p class="muted">No cards.</p>`;
-  return `<div class="visual-columns">${buckets.map((b) => visualColumnHtml(b, cardsById)).join("")}</div>`;
 }
 
 function visualHtml(mainDeck: ViewerCard[]): string {
@@ -205,37 +226,27 @@ function visualHtml(mainDeck: ViewerCard[]): string {
     cardInfo.set(c.cardId, { types: c.types, manaCost: c.manaCost });
     cardsById.set(c.cardId, c);
   }
-
-  const lands = mainDeck.filter((c) => c.types.includes("Land"));
-  const nonLand = mainDeck.filter((c) => !c.types.includes("Land"));
-  const creatures = nonLand.filter((c) => c.types.includes("Creature"));
-  const nonCreatures = nonLand.filter((c) => !c.types.includes("Creature"));
-
-  const landsSection =
-    lands.length > 0
-      ? `<div class="visual-lands">
-          <div class="visual-group-title">Lands</div>
-          ${visualColumnsHtml(lands, cardInfo, cardsById)}
-        </div>`
-      : "";
+  // One pass over the whole maindeck (lands included) - CURVE_BUCKET_ORDER
+  // already places "Land" among the mana-cost buckets, so it just becomes
+  // one more column in the same row rather than a separate section.
+  const buckets = groupByManaCurve(
+    mainDeck.map((c) => ({ cardId: c.cardId, quantity: c.quantity })),
+    cardInfo,
+  );
+  const columns = buckets
+    .map((b) => visualColumnHtml(b, cardsById))
+    .filter((html) => html.length > 0)
+    .join("");
 
   return `
-    <section class="visual-section">
+    <section class="visual-section" id="visual-section">
       <div class="visual-toolbar">
-        <h2>Maindeck by mana cost <span class="muted">(spells only - lands shown separately below)</span></h2>
+        <h2>Maindeck by mana cost</h2>
         <button id="visual-separate-btn" class="toggle-btn" onclick="toggleVisualSeparate()">Separate creatures / spells</button>
       </div>
-      <div id="visual-combined" class="visual-columns-wrap active">
-        ${visualColumnsHtml(nonLand, cardInfo, cardsById)}
+      <div class="visual-columns">
+        ${columns}
       </div>
-      <div id="visual-separated" class="visual-columns-wrap">
-        <div class="visual-group-title">Creatures</div>
-        ${visualColumnsHtml(creatures, cardInfo, cardsById)}
-        <div class="visual-group-gap"></div>
-        <div class="visual-group-title">Other spells</div>
-        ${visualColumnsHtml(nonCreatures, cardInfo, cardsById)}
-      </div>
-      ${landsSection}
     </section>`;
 }
 
@@ -290,7 +301,7 @@ export function generateDeckViewerHtml(data: DeckViewerData): string {
 <meta charset="utf-8">
 <title>${escapeHtml(data.deckName ?? data.definitionLabel)} - MTGA Tracker</title>
 <style>
-  :root { color-scheme: dark; --card-img-width: ${cardImageWidthPx}px; }
+  :root { color-scheme: dark; --card-img-width: ${cardImageWidthPx}px; --card-overlap: calc(var(--card-img-width) * -1.05); }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #14151a; color: #e8e8ec; margin: 0; padding: 24px; }
   h1 { font-size: 1.4rem; margin: 0 0 4px; }
   h2 { font-size: 1rem; margin: 0 0 8px; color: #cfd2dc; }
@@ -321,23 +332,32 @@ export function generateDeckViewerHtml(data: DeckViewerData): string {
   .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; }
   .swatch-creature { background: #4fae6a; }
   .swatch-noncreature { background: #4fa8e0; }
-  .visual-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+  .visual-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
   .toggle-btn { background: #22232c; color: #e8e8ec; border: 1px solid #34364280; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.85rem; }
   .toggle-btn.active { background: #3d4ee0; border-color: #3d4ee0; }
-  .visual-columns-wrap { display: none; }
-  .visual-columns-wrap.active { display: block; }
-  .visual-columns { display: flex; gap: 16px; align-items: flex-start; overflow-x: auto; padding-bottom: 8px; }
-  .visual-column { display: flex; flex-direction: column; gap: 8px; flex: 0 0 auto; width: var(--card-img-width); }
-  .visual-column-header { text-align: center; font-size: 0.8rem; color: #8a8d99; padding-bottom: 4px; border-bottom: 1px solid #2a2c36; }
-  .visual-column-cards { display: flex; flex-direction: column; gap: 8px; }
-  .visual-card { position: relative; }
-  .visual-card img { width: 100%; border-radius: 6px; display: block; }
+  .visual-columns { display: flex; gap: 20px; align-items: flex-start; overflow-x: auto; padding-bottom: 8px; }
+  .visual-column { display: flex; flex-direction: column; flex: 0 0 auto; width: var(--card-img-width); }
+  .visual-column-header { text-align: center; font-size: 0.8rem; color: #8a8d99; padding-bottom: 4px; margin-bottom: 14px; border-bottom: 1px solid #2a2c36; }
+  /* Fanned/overlapping stack: every card after the first in a column pulls up
+     over the previous card's bottom (via the negative --card-overlap margin),
+     so only a sliver of each earlier card peeks out above the next one -
+     matching the Arena deck-builder screenshot this tab is modeled on. The
+     card lowest in a column's stack is the one shown in full; hovering any
+     card lifts it (z-index + a small translateY) above the ones after it so
+     it can be seen whole without leaving the stack. */
+  .visual-column-cards { display: flex; flex-direction: column; }
+  .visual-card { position: relative; transition: transform 120ms ease; }
+  .visual-card:not(:first-child) { margin-top: var(--card-overlap); }
+  .visual-card:hover, .visual-card:focus { z-index: 30; transform: translateY(-6px); }
+  .visual-card img { width: 100%; border-radius: 6px; display: block; box-shadow: 0 2px 6px rgba(0,0,0,0.5); }
+  .visual-card:hover img, .visual-card:focus img { box-shadow: 0 10px 24px rgba(0,0,0,0.65); }
   .visual-card:hover .preview, .visual-card:focus .preview { display: block; }
   .visual-card-placeholder { width: var(--card-img-width); aspect-ratio: 5 / 7; background: #22232c; border: 1px solid #34364280; border-radius: 6px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 6px; text-align: center; font-size: 0.7rem; }
-  .visual-card-qty { position: absolute; bottom: 4px; right: 4px; background: rgba(0,0,0,0.75); color: #fff; font-size: 0.7rem; font-weight: 600; padding: 1px 5px; border-radius: 4px; }
-  .visual-group-title { margin: 4px 0 8px; font-size: 0.9rem; color: #cfd2dc; font-weight: 600; }
-  .visual-group-gap { height: 28px; }
-  .visual-lands { margin-top: 20px; padding-top: 16px; border-top: 1px solid #2a2c36; }
+  .visual-card-qty { position: absolute; bottom: 4px; right: 4px; background: rgba(0,0,0,0.75); color: #fff; font-size: 0.7rem; font-weight: 600; padding: 1px 5px; border-radius: 4px; z-index: 1; }
+  /* "Separate creatures / spells": same layout either way (see the header
+     comment) - this just opens a small gap at the one card immediately
+     after the last creature in a column, instead of the usual overlap. */
+  .visual-section.separated .visual-card[data-role="creature"] + .visual-card[data-role="spell"] { margin-top: 18px; }
   .draft-picks { display: flex; flex-direction: column; gap: 20px; }
   .draft-pick { border-bottom: 1px solid #2a2c36; padding-bottom: 14px; }
   .draft-card-list { display: flex; flex-wrap: wrap; gap: 2px 18px; }
@@ -390,12 +410,10 @@ export function generateDeckViewerHtml(data: DeckViewerData): string {
       document.querySelectorAll('.tab-btn').forEach(function (el) { el.classList.toggle('active', el.dataset.view === name); });
     }
     function toggleVisualSeparate() {
+      var section = document.getElementById('visual-section');
       var btn = document.getElementById('visual-separate-btn');
-      var combined = document.getElementById('visual-combined');
-      var separated = document.getElementById('visual-separated');
-      var nowSeparated = !separated.classList.contains('active');
-      combined.classList.toggle('active', !nowSeparated);
-      separated.classList.toggle('active', nowSeparated);
+      var nowSeparated = !section.classList.contains('separated');
+      section.classList.toggle('separated', nowSeparated);
       btn.classList.toggle('active', nowSeparated);
       btn.textContent = nowSeparated ? 'Show combined' : 'Separate creatures / spells';
     }

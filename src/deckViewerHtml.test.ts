@@ -58,30 +58,35 @@ function run() {
   assert.ok(html.includes("curve-label\">Land<"));
   assert.ok(html.includes("curve-label\">2<"));
 
-  // Milestone 13: "Visual" tab - a mana-cost-grouped, image-thumbnail view of
-  // the maindeck (Arena's own deck-builder style), separate from the "Deck
-  // list"/"Curve" tabs above.
+  // Milestone 13/14: "Visual" tab - one column per mana-cost bucket, each an
+  // overlapping/fanned stack of real card-image thumbnails (Arena's own
+  // deck-builder style), separate from the "Deck list"/"Curve" tabs above.
   assert.ok(html.includes(`data-view="visual"`));
   assert.ok(html.includes(">Visual<"));
-  // Default card width baked in as a CSS variable when the loader doesn't specify one.
+  // Default card width (and the overlap amount derived from it) baked in as CSS variables when the loader doesn't specify a width.
   assert.ok(html.includes(`--card-img-width: ${DEFAULT_CARD_IMAGE_WIDTH_PX}px`));
-  // A card with an image gets a real thumbnail plus a quantity badge (only shown above x1).
+  assert.ok(html.includes("--card-overlap:"));
+  // A card with an image gets a real thumbnail plus a quantity badge (only shown above x1), tagged with its creature/spell/land role.
   assert.ok(html.includes(`<img src="https://example.com/img.jpg" alt="Bothersome Noisemaker">`));
   assert.ok(html.includes("visual-card-qty\">x2<"));
-  // A card with no image falls back to a named placeholder box instead of vanishing, with no quantity badge at x1.
+  assert.ok(/<div class="visual-card" data-role="creature"[^>]*>[\s\S]*?Bothersome Noisemaker/.test(html));
+  // A card with no image falls back to a named placeholder box instead of vanishing, with no quantity badge at x1, tagged "spell" (non-creature, non-land).
   assert.ok(html.includes("visual-card-placeholder"));
-  assert.ok(html.includes("Necromancy"));
-  // Lands get their own always-visible section (not mixed into the mana-cost columns) - Mountain (x8) shows up there.
-  assert.ok(html.includes("visual-lands"));
+  assert.ok(/<div class="visual-card" data-role="spell"[^>]*>[\s\S]*?Necromancy/.test(html));
+  // Milestone 14: lands are just one more column in the same row, not a separate section - Mountain (x8) shows up there, tagged "land".
+  assert.ok(!html.includes("visual-lands"));
   assert.ok(html.includes("visual-card-qty\">x8<"));
-  // The combined view is active by default; the separated (creature/spell) view starts hidden.
-  assert.ok(/id="visual-combined" class="visual-columns-wrap active"/.test(html));
-  assert.ok(/id="visual-separated" class="visual-columns-wrap"[^>]*>/.test(html) && !/id="visual-separated" class="visual-columns-wrap active"/.test(html));
-  // Separated view has a "Creatures" group and an "Other spells" group with a visible gap between them.
-  assert.ok(html.includes("Creatures"));
-  assert.ok(html.includes("Other spells"));
-  assert.ok(html.includes("visual-group-gap"));
+  assert.ok(/<div class="visual-card" data-role="land"[^>]*>[\s\S]*?Mountain/.test(html));
+  // Milestone 14: no more separate "Creatures"/"Other spells" sub-layout or gap div - same columns always, just a CSS class toggle.
+  assert.ok(!html.includes("visual-lands"));
+  assert.ok(!html.includes("visual-group-gap"));
+  assert.ok(!html.includes("visual-group-title"));
+  assert.ok(!html.includes('id="visual-combined"'));
+  assert.ok(!html.includes('id="visual-separated"'));
+  // The "Separate" toggle's adjacent-sibling CSS rule (only overrides the margin at the creature->spell boundary card, when .visual-section carries .separated) and its JS are present.
+  assert.ok(html.includes(`.visual-section.separated .visual-card[data-role="creature"] + .visual-card[data-role="spell"]`));
   assert.ok(html.includes("toggleVisualSeparate"));
+  assert.ok(html.includes(`id="visual-section"`));
 
   // A custom card-image width (from the Settings window's "Card size" choice) is baked in as the CSS variable instead of the default.
   const wideCards = generateDeckViewerHtml({ ...data, cardImageWidthPx: 210 });
@@ -156,7 +161,7 @@ function run() {
   assert.ok(withPickTwo.includes("2 cards taken this pick"));
 
   console.log(
-    "OK: generateDeckViewerHtml renders header/record/colors, maindeck+sideboard card rows (image or oracle-text hover fallback), curve buckets, the Visual tab's mana-cost columns/lands section/creature-spell separation and configurable card width, the no-sideboard-captured message, escapes card names, hides the Draft tab with no draft data, renders pack/pick/wheel info when draft data is present, and highlights both cards of a multi-card 'Pick Two' pick.",
+    "OK: generateDeckViewerHtml renders header/record/colors, maindeck+sideboard card rows (image or oracle-text hover fallback), curve buckets, the Visual tab's overlapping mana-cost columns (lands as their own column, not a section), the creature/spell 'Separate' toggle's boundary-only CSS rule (not a duplicated layout), configurable card width/overlap, the no-sideboard-captured message, escapes card names, hides the Draft tab with no draft data, renders pack/pick/wheel info when draft data is present, and highlights both cards of a multi-card 'Pick Two' pick.",
   );
 }
 
