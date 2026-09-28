@@ -1,5 +1,5 @@
 import type { MatchOutcome, WinRate } from "./rollups.js";
-import { winRate } from "./rollups.js";
+import { reconcileWinRate, sumWinRates, winRate } from "./rollups.js";
 
 /**
  * One event run's worth of input for rollupByColorCombo below: which color
@@ -28,8 +28,20 @@ export interface ColorComboRollup {
  * Groups a set of event runs by the color combination their deck played,
  * combining every run that shares a combo (e.g. two separate HOB QuickDraft
  * runs both played as "UR") into one win-rate bucket - milestone 7 phase 3.
+ *
+ * `standingsByEvent` (milestone 12, optional - defaults to none) reconciles
+ * each contributing run against Arena's own CourseStanding for it before
+ * summing into the combo's winRate, same rationale as
+ * rollups.ts's reconciledWinRateByRun (a color-combo breakdown is just
+ * another way of grouping runs together, so it has exactly the same
+ * "summing raw outcomes and reconciling after the fact isn't meaningful"
+ * problem the coarser format/subtype/definition rollups had). Omitting it
+ * keeps the previous behavior (plain local winRate(outcomes)) unchanged.
  */
-export function rollupByColorCombo(runs: RunColorInfo[]): Map<string, ColorComboRollup> {
+export function rollupByColorCombo(
+  runs: RunColorInfo[],
+  standingsByEvent: Map<string, { wins: number; losses: number }> = new Map(),
+): Map<string, ColorComboRollup> {
   const byCombo = new Map<string, ColorComboRollup>();
   for (const run of runs) {
     let bucket = byCombo.get(run.comboKey);
@@ -40,6 +52,11 @@ export function rollupByColorCombo(runs: RunColorInfo[]): Map<string, ColorCombo
     if (!bucket.runIds.includes(run.eventId)) bucket.runIds.push(run.eventId);
     bucket.outcomes.push(...run.outcomes);
   }
-  for (const bucket of byCombo.values()) bucket.winRate = winRate(bucket.outcomes);
+  const runsById = new Map(runs.map((r) => [r.eventId, r]));
+  for (const bucket of byCombo.values()) {
+    bucket.winRate = sumWinRates(
+      bucket.runIds.map((runId) => reconcileWinRate(winRate(runsById.get(runId)?.outcomes ?? []), standingsByEvent.get(runId))),
+    );
+  }
   return byCombo;
 }

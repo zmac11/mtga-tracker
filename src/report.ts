@@ -2,7 +2,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { TypedEventStore } from "./db/sqliteStore.js";
 import type { DraftPickMade } from "./domain/types.js";
-import { computeMatchOutcomes, reconcileWinRate, rollupByEvent, rollupByEventDefinition, rollupBySubtype, rollupByFormat, winRate } from "./domain/rollups.js";
+import { computeMatchOutcomes, latestStandingByEvent, reconciledWinRateByRun, rollupByEvent, rollupByEventDefinition, rollupBySubtype, rollupByFormat } from "./domain/rollups.js";
 import { buildEventRunHistory, listEventRuns } from "./domain/eventHistory.js";
 import { loadEventHistorySource } from "./eventHistoryLoader.js";
 import { deriveDeckColors } from "./domain/deckColors.js";
@@ -100,12 +100,14 @@ function main() {
   const matchFounds = dedupeBy(store.all("MatchFound"), (m) => m.matchId);
   const matchCompletions = dedupeBy(store.all("MatchCompleted"), (m) => m.matchId);
   // Milestone 12: Arena's own authoritative per-event record (see
-  // CourseStanding in types.ts / milestone 6) - used below to reconcile the
-  // "by event run" win-rate table the same way eventHistory.ts's
-  // buildEventRunHistory and the overlay's live display already are, so
-  // --event=<id> and the deck-viewer page can't show a different number
-  // than this table for the same run.
+  // CourseStanding in types.ts / milestone 6) - used below to reconcile
+  // every win-rate view (per-run, by event type/subtype/format, and by
+  // color combo) the same way eventHistory.ts's buildEventRunHistory and
+  // the overlay's live display already are, so no two views in this report
+  // - or the deck-viewer page - can show a different number for the same
+  // run. latestStandingByEvent keeps only the LATEST snapshot per event.
   const courseStandings = store.all("CourseStanding");
+  const standingsByEvent = latestStandingByEvent(courseStandings);
 
   // One outcome record per match, computed once (via the shared rollups
   // module - also used by the overlay's live state) and reused below for
@@ -141,16 +143,17 @@ function main() {
   // section right below for the aggregate across those.
   if (groupBy === "run" || groupBy === "all") {
     const byEvent = rollupByEvent(matchOutcomes);
+    const reconciledByRun = reconciledWinRateByRun(matchOutcomes, standingsByEvent);
 
     console.log("\n=== Win rate by event run / deck ===");
     if (byEvent.size === 0) {
       console.log("(no matches captured yet)");
     }
-    for (const [eventId, outcomes] of byEvent) {
+    for (const [eventId] of byEvent) {
       const deck = decks.find((d) => d.eventName === eventId);
       const label = deck ? `${eventId} - "${deck.deckName}"` : eventId;
-      const standing = [...courseStandings].reverse().find((s) => s.eventId === eventId) ?? null;
-      const { wins, losses, total, pct } = reconcileWinRate(winRate(outcomes), standing);
+      // Guaranteed present: reconciledByRun was built from this same byEvent grouping of matchOutcomes.
+      const { wins, losses, total, pct } = reconciledByRun.get(eventId)!;
       console.log(`  - ${label}: ${wins}-${losses}` + (total > 0 ? ` (${pct} over ${total} decided match${total === 1 ? "" : "es"})` : " (no decided matches yet)"));
     }
   }
@@ -161,14 +164,14 @@ function main() {
   // time it comes back around. This is the "hobbit quick draft history"
   // compaction level from the user's request - one specific subtype+set.
   if (groupBy === "definition" || groupBy === "all") {
-    const byDefinition = rollupByEventDefinition(matchOutcomes);
+    const byDefinition = rollupByEventDefinition(matchOutcomes, standingsByEvent);
 
     console.log("\n=== Win rate by event type (across all runs of that exact type) ===");
     if (byDefinition.size === 0) {
       console.log("(no matches captured yet)");
     }
-    for (const [, { identity, outcomes, runIds }] of byDefinition) {
-      const { wins, losses, total, pct } = winRate(outcomes);
+    for (const [, { identity, runIds, winRate: rate }] of byDefinition) {
+      const { wins, losses, total, pct } = rate;
       const runNote = runIds.length > 1 ? ` (${runIds.length} runs)` : "";
       console.log(
         `  - [${identity.format}] ${identity.definitionLabel}${runNote}: ${wins}-${losses}` +
@@ -181,14 +184,14 @@ function main() {
   // regardless of which set) - the user's "specific quick draft history"
   // compaction level.
   if (groupBy === "subtype" || groupBy === "all") {
-    const bySubtype = rollupBySubtype(matchOutcomes);
+    const bySubtype = rollupBySubtype(matchOutcomes, standingsByEvent);
 
     console.log("\n=== Win rate by subtype (every set combined) ===");
     if (bySubtype.size === 0) {
       console.log("(no matches captured yet)");
     }
-    for (const [subtype, { outcomes, definitionKeys }] of bySubtype) {
-      const { wins, losses, total, pct } = winRate(outcomes);
+    for (const [subtype, { definitionKeys, winRate: rate }] of bySubtype) {
+      const { wins, losses, total, pct } = rate;
       const setNote = definitionKeys.length > 1 ? ` (${definitionKeys.length} sets)` : "";
       console.log(`  - ${subtype}${setNote}: ${wins}-${losses}` + (total > 0 ? ` (${pct} over ${total} decided match${total === 1 ? "" : "es"})` : " (no decided matches yet)"));
     }
@@ -198,14 +201,14 @@ function main() {
   // event, any subtype, any set) - the user's "all events in draft history"
   // compaction level.
   if (groupBy === "format" || groupBy === "all") {
-    const byFormat = rollupByFormat(matchOutcomes);
+    const byFormat = rollupByFormat(matchOutcomes, standingsByEvent);
 
     console.log("\n=== Win rate by format (most compacted) ===");
     if (byFormat.size === 0) {
       console.log("(no matches captured yet)");
     }
-    for (const [format, { outcomes, definitionKeys }] of byFormat) {
-      const { wins, losses, total, pct } = winRate(outcomes);
+    for (const [format, { definitionKeys, winRate: rate }] of byFormat) {
+      const { wins, losses, total, pct } = rate;
       console.log(
         `  - ${format} (${definitionKeys.length} event type${definitionKeys.length === 1 ? "" : "s"}): ${wins}-${losses}` +
           (total > 0 ? ` (${pct} over ${total} decided match${total === 1 ? "" : "es"})` : " (no decided matches yet)"),
@@ -234,7 +237,7 @@ function main() {
     }
 
     const byEventRun = rollupByEvent(matchOutcomes);
-    const byDefinitionForColors = rollupByEventDefinition(matchOutcomes);
+    const byDefinitionForColors = rollupByEventDefinition(matchOutcomes, standingsByEvent);
 
     console.log("\n=== Win rate by color combination (within each event type) ===");
     if (byDefinitionForColors.size === 0) {
@@ -246,7 +249,7 @@ function main() {
         const comboKey = deck ? deriveDeckColors(deck.mainDeck, cardColors).comboKey : "(no deck captured)";
         return { eventId: runId, comboKey, outcomes: byEventRun.get(runId) ?? [] };
       });
-      const byCombo = rollupByColorCombo(runInfos);
+      const byCombo = rollupByColorCombo(runInfos, standingsByEvent);
       console.log(`  ${identity.definitionLabel}:`);
       for (const [comboKey, bucket] of byCombo) {
         const { wins, losses, total, pct } = bucket.winRate;

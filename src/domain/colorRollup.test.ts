@@ -38,6 +38,21 @@ function run() {
   assert.equal(noDeck.outcomes.length, 1);
 
   console.log("OK: rollupByColorCombo combines runs sharing a color combo into one win-rate bucket, keeping different combos (including 'no deck captured') separate.");
+
+  // --- Reconciliation against CourseStanding (milestone 12 follow-up) ---
+  // Both UR runs' local capture only shows 2-2 combined (see above); if one
+  // of those runs actually had a higher CourseStanding record (a real
+  // match went uncaptured), the combo's total must reflect the reconciled
+  // per-run record, not the raw local sum.
+  const standingsByEvent = new Map([["QuickDraft_HOB_20260915", { wins: 3, losses: 2 }]]); // was locally 2-1 for this run alone
+  const reconciledByCombo = rollupByColorCombo(runs, standingsByEvent);
+  const reconciledUr = reconciledByCombo.get("UR")!;
+  // Run 20260915 reconciled: max(2,3)-max(1,2) = 3-2. Run 20261020 unchanged (no standing): 0-1.
+  // Combined: (3+0)-(2+1) = 3-3, not the raw local 2-2.
+  assert.equal(reconciledUr.winRate.wins, 3);
+  assert.equal(reconciledUr.winRate.losses, 3);
+
+  console.log("OK: rollupByColorCombo reconciles each contributing run against its own CourseStanding before summing into the combo's winRate.");
 }
 
 run();

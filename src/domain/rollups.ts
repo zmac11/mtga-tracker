@@ -1,4 +1,4 @@
-import type { MatchCompleted, MatchFound } from "./types.js";
+import type { CourseStanding, MatchCompleted, MatchFound } from "./types.js";
 import { parseEventIdentity, type EventIdentity } from "./eventIdentity.js";
 
 /**
@@ -89,6 +89,55 @@ export function reconcileWinRate(local: WinRate, standing: { wins: number; losse
 }
 
 /**
+ * Builds "the LATEST CourseStanding captured for each event" as a lookup
+ * Map, keyed by eventId - the one place that decides what "latest" means
+ * (a plain last-write-wins pass over the array, relying on
+ * TypedEventStore.all()'s `ORDER BY id ASC`, i.e. chronological order -
+ * confirmed via sqliteStore.ts). Added in milestone 12's follow-up pass
+ * after the same `[...standings].reverse().find(...)` snippet had been
+ * copy-pasted into eventHistory.ts and report.ts separately - see the
+ * "one backstop, every call site" gotcha this project already learned the
+ * hard way once this milestone.
+ */
+export function latestStandingByEvent(standings: CourseStanding[]): Map<string, CourseStanding> {
+  const result = new Map<string, CourseStanding>();
+  for (const s of standings) result.set(s.eventId, s);
+  return result;
+}
+
+/**
+ * Per-run building block every coarser rollup below sums from, instead of
+ * summing raw MatchOutcomes and only reconciling the total afterward - the
+ * latter isn't meaningful, since any "extra" wins/losses a CourseStanding
+ * contributes over local capture don't have individual MatchOutcome rows
+ * to sum in the first place. Only covers runs that appear in `outcomes`
+ * (i.e. we captured at least one MatchFound for them) - a run with a
+ * CourseStanding but literally zero locally captured matches wouldn't be
+ * visible to rollupByEvent()/the callers below either way, since they're
+ * driven by the same `outcomes` list; that's a known, narrower gap than
+ * this fix closes; see the gotcha above.
+ */
+export function reconciledWinRateByRun(outcomes: MatchOutcome[], standingsByEvent: Map<string, { wins: number; losses: number }>): Map<string, WinRate> {
+  const byRun = rollupByEvent(outcomes);
+  const result = new Map<string, WinRate>();
+  for (const [eventId, runOutcomes] of byRun) {
+    result.set(eventId, reconcileWinRate(winRate(runOutcomes), standingsByEvent.get(eventId)));
+  }
+  return result;
+}
+
+/** Sums a set of (already reconciled) per-run WinRates into one combined WinRate. */
+export function sumWinRates(rates: WinRate[]): WinRate {
+  let wins = 0;
+  let losses = 0;
+  for (const r of rates) {
+    wins += r.wins;
+    losses += r.losses;
+  }
+  return winRateFromCounts(wins, losses);
+}
+
+/**
  * Groups outcomes by event (eventId/eventName) - i.e. by *run*: every match
  * from one specific dated live-window of an event (e.g. one specific
  * "QuickDraft_HOB_20260915"). This is currently the only reliable join back
@@ -115,6 +164,15 @@ export interface EventDefinitionRollup {
   outcomes: MatchOutcome[];
   /** Distinct eventIds (dated runs) contributing to this bucket, in first-seen order. */
   runIds: string[];
+  /**
+   * The bucket's win/loss, summed from each contributing run's OWN
+   * reconciled record (milestone 12 - see reconcileWinRate/
+   * reconciledWinRateByRun) rather than computed via winRate(outcomes).
+   * Falls back to the plain local winRate(outcomes) when no
+   * standingsByEvent is passed to rollupByEventDefinition (the default),
+   * so this is backward compatible with every existing caller/test.
+   */
+  winRate: WinRate;
 }
 
 /**
@@ -123,8 +181,19 @@ export interface EventDefinitionRollup {
  * across every time that event's been live, not just the current dated run.
  * Added 2026-09-24 per the user's request not to treat a repeated event
  * (same format/set, later date) as a brand new unrelated event.
+ *
+ * `standingsByEvent` (milestone 12, optional - defaults to none) lets the
+ * bucket's `winRate` be reconciled against Arena's own per-run record
+ * before summing across runs, the same way eventHistory.ts's
+ * buildEventRunHistory already reconciles a single run - see
+ * reconciledWinRateByRun's comment for why summing raw outcomes and only
+ * reconciling the total afterward wouldn't be meaningful.
  */
-export function rollupByEventDefinition(outcomes: MatchOutcome[]): Map<string, EventDefinitionRollup> {
+export function rollupByEventDefinition(
+  outcomes: MatchOutcome[],
+  standingsByEvent: Map<string, { wins: number; losses: number }> = new Map(),
+): Map<string, EventDefinitionRollup> {
+  const perRun = reconciledWinRateByRun(outcomes, standingsByEvent);
   const byDefinition = new Map<string, EventDefinitionRollup>();
   for (const o of outcomes) {
     const eventId = o.eventId ?? "(unknown event)";
@@ -132,11 +201,14 @@ export function rollupByEventDefinition(outcomes: MatchOutcome[]): Map<string, E
     const key = identity.definitionKey;
     let bucket = byDefinition.get(key);
     if (!bucket) {
-      bucket = { identity, outcomes: [], runIds: [] };
+      bucket = { identity, outcomes: [], runIds: [], winRate: winRateFromCounts(0, 0) };
       byDefinition.set(key, bucket);
     }
     bucket.outcomes.push(o);
     if (!bucket.runIds.includes(eventId)) bucket.runIds.push(eventId);
+  }
+  for (const bucket of byDefinition.values()) {
+    bucket.winRate = sumWinRates(bucket.runIds.map((runId) => perRun.get(runId) ?? winRateFromCounts(0, 0)));
   }
   return byDefinition;
 }
@@ -149,9 +221,16 @@ export interface GroupedRollup {
   runIds: string[];
   /** Distinct event-type definitionKeys contributing to this bucket (e.g. both "QuickDraft_HOB" and "QuickDraft_XYZ" can both roll up under subtype "QuickDraft"). */
   definitionKeys: string[];
+  /** Summed from each contributing run's own reconciled record - see EventDefinitionRollup.winRate's comment (milestone 12); same backward-compatible default-to-local-only behavior. */
+  winRate: WinRate;
 }
 
-function groupBy(outcomes: MatchOutcome[], keyOf: (identity: EventIdentity) => string): Map<string, GroupedRollup> {
+function groupBy(
+  outcomes: MatchOutcome[],
+  keyOf: (identity: EventIdentity) => string,
+  standingsByEvent: Map<string, { wins: number; losses: number }> = new Map(),
+): Map<string, GroupedRollup> {
+  const perRun = reconciledWinRateByRun(outcomes, standingsByEvent);
   const grouped = new Map<string, GroupedRollup>();
   for (const o of outcomes) {
     const eventId = o.eventId ?? "(unknown event)";
@@ -159,12 +238,15 @@ function groupBy(outcomes: MatchOutcome[], keyOf: (identity: EventIdentity) => s
     const key = keyOf(identity);
     let bucket = grouped.get(key);
     if (!bucket) {
-      bucket = { key, outcomes: [], runIds: [], definitionKeys: [] };
+      bucket = { key, outcomes: [], runIds: [], definitionKeys: [], winRate: winRateFromCounts(0, 0) };
       grouped.set(key, bucket);
     }
     bucket.outcomes.push(o);
     if (!bucket.runIds.includes(eventId)) bucket.runIds.push(eventId);
     if (!bucket.definitionKeys.includes(identity.definitionKey)) bucket.definitionKeys.push(identity.definitionKey);
+  }
+  for (const bucket of grouped.values()) {
+    bucket.winRate = sumWinRates(bucket.runIds.map((runId) => perRun.get(runId) ?? winRateFromCounts(0, 0)));
   }
   return grouped;
 }
@@ -178,8 +260,11 @@ function groupBy(outcomes: MatchOutcome[], keyOf: (identity: EventIdentity) => s
  * rollupByEventDefinition above - from most to least compacted, on top of
  * the finest-grained rollupByEvent per exact run).
  */
-export function rollupBySubtype(outcomes: MatchOutcome[]): Map<string, GroupedRollup> {
-  return groupBy(outcomes, (identity) => identity.subtype);
+export function rollupBySubtype(
+  outcomes: MatchOutcome[],
+  standingsByEvent: Map<string, { wins: number; losses: number }> = new Map(),
+): Map<string, GroupedRollup> {
+  return groupBy(outcomes, (identity) => identity.subtype, standingsByEvent);
 }
 
 /**
@@ -187,6 +272,9 @@ export function rollupBySubtype(outcomes: MatchOutcome[]): Map<string, GroupedRo
  * Constructed / Other), combining every event of that format regardless of
  * subtype or set - e.g. "how have I done across all limited drafts, ever."
  */
-export function rollupByFormat(outcomes: MatchOutcome[]): Map<string, GroupedRollup> {
-  return groupBy(outcomes, (identity) => identity.format);
+export function rollupByFormat(
+  outcomes: MatchOutcome[],
+  standingsByEvent: Map<string, { wins: number; losses: number }> = new Map(),
+): Map<string, GroupedRollup> {
+  return groupBy(outcomes, (identity) => identity.format, standingsByEvent);
 }

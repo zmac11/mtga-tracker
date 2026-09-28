@@ -1,5 +1,5 @@
 import type { DraftPackSeen, DraftPickMade, DeckSubmitted, DraftCompleted, MatchFound, MatchCompleted, CourseStanding } from "./types.js";
-import { computeMatchOutcomes, reconcileWinRate, winRate, type MatchOutcome, type WinRate } from "./rollups.js";
+import { computeMatchOutcomes, latestStandingByEvent, reconcileWinRate, winRate, type MatchOutcome, type WinRate } from "./rollups.js";
 import { parseEventIdentity, type EventIdentity } from "./eventIdentity.js";
 
 /**
@@ -125,10 +125,10 @@ export function buildEventRunHistory(eventId: string, source: EventHistorySource
   // per-run record could (and did, for a real event affected by the
   // log-rotation bug) show a different, lower number than the overlay for
   // the exact same event, purely because local capture missed a match
-  // Arena's own bookkeeping still had. `.reverse().find()` picks the LATEST
-  // CourseStanding captured for this eventId, since source.courseStandings
-  // isn't pre-filtered to one entry per event.
-  const standing = [...source.courseStandings].reverse().find((s) => s.eventId === eventId) ?? null;
+  // Arena's own bookkeeping still had. latestStandingByEvent picks the
+  // LATEST CourseStanding captured for this eventId, since
+  // source.courseStandings isn't pre-filtered to one entry per event.
+  const standing = latestStandingByEvent(source.courseStandings).get(eventId) ?? null;
 
   return {
     identity,
