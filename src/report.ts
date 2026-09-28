@@ -2,7 +2,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { TypedEventStore } from "./db/sqliteStore.js";
 import type { DraftPickMade } from "./domain/types.js";
-import { computeMatchOutcomes, rollupByEvent, rollupByEventDefinition, rollupBySubtype, rollupByFormat, winRate } from "./domain/rollups.js";
+import { computeMatchOutcomes, reconcileWinRate, rollupByEvent, rollupByEventDefinition, rollupBySubtype, rollupByFormat, winRate } from "./domain/rollups.js";
 import { buildEventRunHistory, listEventRuns } from "./domain/eventHistory.js";
 import { loadEventHistorySource } from "./eventHistoryLoader.js";
 import { deriveDeckColors } from "./domain/deckColors.js";
@@ -99,6 +99,13 @@ function main() {
   // --- Matches ---
   const matchFounds = dedupeBy(store.all("MatchFound"), (m) => m.matchId);
   const matchCompletions = dedupeBy(store.all("MatchCompleted"), (m) => m.matchId);
+  // Milestone 12: Arena's own authoritative per-event record (see
+  // CourseStanding in types.ts / milestone 6) - used below to reconcile the
+  // "by event run" win-rate table the same way eventHistory.ts's
+  // buildEventRunHistory and the overlay's live display already are, so
+  // --event=<id> and the deck-viewer page can't show a different number
+  // than this table for the same run.
+  const courseStandings = store.all("CourseStanding");
 
   // One outcome record per match, computed once (via the shared rollups
   // module - also used by the overlay's live state) and reused below for
@@ -142,7 +149,8 @@ function main() {
     for (const [eventId, outcomes] of byEvent) {
       const deck = decks.find((d) => d.eventName === eventId);
       const label = deck ? `${eventId} - "${deck.deckName}"` : eventId;
-      const { wins, losses, total, pct } = winRate(outcomes);
+      const standing = [...courseStandings].reverse().find((s) => s.eventId === eventId) ?? null;
+      const { wins, losses, total, pct } = reconcileWinRate(winRate(outcomes), standing);
       console.log(`  - ${label}: ${wins}-${losses}` + (total > 0 ? ` (${pct} over ${total} decided match${total === 1 ? "" : "es"})` : " (no decided matches yet)"));
     }
   }

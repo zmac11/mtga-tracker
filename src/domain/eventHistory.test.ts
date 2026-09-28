@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { buildEventRunHistory, listEventRuns, type EventHistorySource } from "./eventHistory.js";
 
 function baseSource(): EventHistorySource {
-  return { decks: [], completions: [], picks: [], packsSeen: [], matchFounds: [], matchCompletions: [], myScreenName: "Me" };
+  return { decks: [], completions: [], picks: [], packsSeen: [], matchFounds: [], matchCompletions: [], courseStandings: [], myScreenName: "Me" };
 }
 
 function run() {
@@ -127,6 +127,56 @@ function run() {
   assert.equal(noDraftHistory.matches[0].outcome, "LOSS");
 
   console.log("OK: buildEventRunHistory scopes deck/sideboard/picks/packs/matches correctly to one run, and listEventRuns finds every run across all three source event kinds.");
+
+  // --- winRate reconciliation against CourseStanding (milestone 12) ---
+  // Real-world motivating case: local capture only has 1 decided match
+  // (1-0) for this run - e.g. a match went uncaptured, the log-rotation
+  // bug being the confirmed real example - but Arena's own EventGetCoursesV2
+  // last reported 3-3 for the same event. The per-run winRate here must
+  // show the reconciled 3-3 (max of each side), matching what the overlay's
+  // live eventRecord would already show for the same event (milestone 6) -
+  // otherwise the deck-viewer/report --event= pages show a different,
+  // stale number than the overlay for the exact same run.
+  const reconciliationSource: EventHistorySource = {
+    ...baseSource(),
+    matchFounds: [
+      {
+        kind: "MatchFound",
+        matchId: "m10",
+        eventId: "QuickDraft_HOB_20260915",
+        players: [
+          { userId: "u1", playerName: "Me", systemSeatId: 1, teamId: 1, courseId: null },
+          { userId: "u2", playerName: "Opp", systemSeatId: 2, teamId: 2, courseId: null },
+        ],
+        ts: "t20",
+      },
+    ],
+    matchCompletions: [
+      { kind: "MatchCompleted", matchId: "m10", results: [{ scope: "MatchScope_Match", result: "ResultType_WinLoss", winningTeamId: 1, reason: "ResultReason_Game" }], ts: "t21" },
+    ],
+    courseStandings: [
+      // An earlier, stale snapshot - must NOT win over the later one below.
+      { kind: "CourseStanding", eventId: "QuickDraft_HOB_20260915", courseId: "course-9", wins: 2, losses: 2, currentModule: "PlayMatch", deckName: "Bot Draft Deck", ts: "t19a" },
+      { kind: "CourseStanding", eventId: "QuickDraft_HOB_20260915", courseId: "course-9", wins: 3, losses: 3, currentModule: "PlayMatch", deckName: "Bot Draft Deck", ts: "t19b" },
+      // A standing for a different event entirely - must not leak in.
+      { kind: "CourseStanding", eventId: "SomeOtherEvent", courseId: "course-other", wins: 9, losses: 9, currentModule: "PlayMatch", deckName: null, ts: "t19c" },
+    ],
+  };
+  const reconciledHistory = buildEventRunHistory("QuickDraft_HOB_20260915", reconciliationSource);
+  assert.equal(reconciledHistory.matches.length, 1, "local capture only has one decided match");
+  assert.equal(reconciledHistory.winRate.wins, 3, "reconciled record should take Arena's higher win count, not the local 1");
+  assert.equal(reconciledHistory.winRate.losses, 3, "reconciled record should take Arena's higher loss count, not the local 0");
+  assert.equal(reconciledHistory.winRate.total, 6);
+  assert.equal(reconciledHistory.winRate.pct, "50%");
+
+  // No CourseStanding captured at all for this event -> falls back to the
+  // local count unchanged, same as before this feature existed.
+  const noStandingHistory = buildEventRunHistory("SomeOtherEvent", { ...reconciliationSource, matchFounds: [], matchCompletions: [], courseStandings: [] });
+  assert.equal(noStandingHistory.winRate.wins, 0);
+  assert.equal(noStandingHistory.winRate.losses, 0);
+  assert.equal(noStandingHistory.winRate.total, 0);
+
+  console.log("OK: buildEventRunHistory's winRate is reconciled against the latest matching CourseStanding (taking the max per side, ignoring stale/unrelated entries), and falls back to the local count when none is captured.");
 }
 
 run();

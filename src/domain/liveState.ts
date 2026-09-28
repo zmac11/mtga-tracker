@@ -9,7 +9,7 @@ import type {
   MatchCompleted,
   MatchFound,
 } from "./types.js";
-import { computeMatchOutcomes, rollupByEvent, winRate, winRateFromCounts, type WinRate } from "./rollups.js";
+import { computeMatchOutcomes, reconcileWinRate, rollupByEvent, winRate, type WinRate } from "./rollups.js";
 
 function dedupeLatestByKey<T>(items: T[], keyFn: (item: T) => string): T[] {
   const map = new Map<string, T>();
@@ -275,11 +275,10 @@ export class LiveStateTracker {
       // screen, not the instant a match ends). Taking the max of each side
       // means the displayed record only ever moves forward, from whichever
       // source currently knows more.
-      const wins = Math.max(localRate.wins, standing?.wins ?? 0);
-      const losses = Math.max(localRate.losses, standing?.losses ?? 0);
+      const reconciled = reconcileWinRate(localRate, standing);
       const deck = [...this.deckSubmissions].reverse().find((d) => d.eventName === eventId) ?? null;
       eventRecord = {
-        ...winRateFromCounts(wins, losses),
+        ...reconciled,
         eventId,
         deckName: deck?.deckName ?? standing?.deckName ?? null,
       };

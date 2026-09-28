@@ -67,6 +67,28 @@ export function winRateFromCounts(wins: number, losses: number): WinRate {
 }
 
 /**
+ * Reconciles a locally-computed WinRate for one event run against Arena's
+ * own CourseStanding for that same run (see CourseStanding's comment in
+ * types.ts) - takes the max of each side independently, exactly the "our
+ * own capture might have missed something, Arena's own count is the
+ * backstop" logic LiveStateTracker.snapshot() already applies to the
+ * overlay's live display (milestone 6). Pulled out into one shared
+ * function (milestone 12) after the deck-viewer page and report.ts's
+ * per-run win-rate table were found to show a different, raw record than
+ * the overlay for the exact same event - both computed winRate() straight
+ * from locally captured matches with no backstop at all, so a local
+ * capture gap (the log-rotation bug is the known real-world example)
+ * showed up as three different numbers for the same event depending on
+ * which screen you looked at. `standing` is null/undefined when no
+ * CourseStanding was ever captured for this event - nothing to reconcile
+ * against, so the local count is returned unchanged.
+ */
+export function reconcileWinRate(local: WinRate, standing: { wins: number; losses: number } | null | undefined): WinRate {
+  if (!standing) return local;
+  return winRateFromCounts(Math.max(local.wins, standing.wins), Math.max(local.losses, standing.losses));
+}
+
+/**
  * Groups outcomes by event (eventId/eventName) - i.e. by *run*: every match
  * from one specific dated live-window of an event (e.g. one specific
  * "QuickDraft_HOB_20260915"). This is currently the only reliable join back

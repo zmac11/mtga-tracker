@@ -1,5 +1,5 @@
-import type { DraftPackSeen, DraftPickMade, DeckSubmitted, DraftCompleted, MatchFound, MatchCompleted } from "./types.js";
-import { computeMatchOutcomes, winRate, type MatchOutcome, type WinRate } from "./rollups.js";
+import type { DraftPackSeen, DraftPickMade, DeckSubmitted, DraftCompleted, MatchFound, MatchCompleted, CourseStanding } from "./types.js";
+import { computeMatchOutcomes, reconcileWinRate, winRate, type MatchOutcome, type WinRate } from "./rollups.js";
 import { parseEventIdentity, type EventIdentity } from "./eventIdentity.js";
 
 /**
@@ -54,6 +54,16 @@ export interface EventHistorySource {
   packsSeen: DraftPackSeen[];
   matchFounds: MatchFound[];
   matchCompletions: MatchCompleted[];
+  /**
+   * Arena's own authoritative win/loss snapshots (milestone 6's backstop -
+   * see CourseStanding in types.ts), added in milestone 12 so a per-run
+   * winRate computed here can be reconciled the same way the overlay's
+   * live eventRecord already is - see buildEventRunHistory below. Order
+   * doesn't need to be pre-filtered/deduped by the caller; only the LATEST
+   * entry for a given eventId is ever used (any earlier duplicates or
+   * stale snapshots for that event are simply ignored).
+   */
+  courseStandings: CourseStanding[];
   myScreenName: string | null;
 }
 
@@ -109,6 +119,17 @@ export function buildEventRunHistory(eventId: string, source: EventHistorySource
   const allOutcomes = computeMatchOutcomes(source.matchFounds, source.matchCompletions, source.myScreenName);
   const matches = allOutcomes.filter((o) => o.eventId === eventId);
 
+  // Reconciled against Arena's own EventGetCoursesV2 record the same way
+  // the overlay's live eventRecord already is (milestone 6) - see
+  // reconcileWinRate's comment for why this exists: without it, this
+  // per-run record could (and did, for a real event affected by the
+  // log-rotation bug) show a different, lower number than the overlay for
+  // the exact same event, purely because local capture missed a match
+  // Arena's own bookkeeping still had. `.reverse().find()` picks the LATEST
+  // CourseStanding captured for this eventId, since source.courseStandings
+  // isn't pre-filtered to one entry per event.
+  const standing = [...source.courseStandings].reverse().find((s) => s.eventId === eventId) ?? null;
+
   return {
     identity,
     eventId,
@@ -117,7 +138,7 @@ export function buildEventRunHistory(eventId: string, source: EventHistorySource
     picks,
     packsSeen,
     matches,
-    winRate: winRate(matches),
+    winRate: reconcileWinRate(winRate(matches), standing),
   };
 }
 

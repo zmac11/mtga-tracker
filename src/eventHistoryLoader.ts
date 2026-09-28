@@ -32,6 +32,10 @@ export function loadEventHistorySource(store: TypedEventStore): EventHistorySour
   const packsSeen = store.all("DraftPackSeen");
   const matchFounds = dedupeBy(store.all("MatchFound"), (m) => m.matchId);
   const matchCompletions = dedupeBy(store.all("MatchCompleted"), (m) => m.matchId);
+  // Milestone 12: no dedup needed here - buildEventRunHistory only ever
+  // reads the LATEST entry for a given eventId (see its comment), so
+  // repeated/stale snapshots from a replayed log are harmless either way.
+  const courseStandings = store.all("CourseStanding");
 
-  return { decks, completions, picks, packsSeen, matchFounds, matchCompletions, myScreenName };
+  return { decks, completions, picks, packsSeen, matchFounds, matchCompletions, courseStandings, myScreenName };
 }
