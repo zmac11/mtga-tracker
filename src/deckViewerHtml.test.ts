@@ -46,6 +46,13 @@ function run() {
   assert.ok(html.includes("BR"));
   assert.ok(html.includes("4-2"));
   assert.ok(html.includes("67%"));
+  // Milestone 15: no splashColors passed - no "(splash: ...)" note at all.
+  assert.ok(!html.includes("(splash:"));
+
+  // Milestone 15: DeckViewerData.splashColors, when present, is called out
+  // separately from the main color-combo line rather than silently dropped.
+  const withSplash = generateDeckViewerHtml({ ...data, splashColors: ["G"] });
+  assert.ok(withSplash.includes("(splash: G)"));
 
   // Maindeck/sideboard card rows.
   assert.ok(html.includes("Bothersome Noisemaker"));
@@ -53,6 +60,19 @@ function run() {
   assert.ok(html.includes("Necromancy"));
   assert.ok(html.includes("Reanimate a creature.")); // oracle-text fallback for a card with no image
   assert.ok(html.includes("Shock")); // sideboard card present
+
+  // Milestone 15: the "Deck list" tab groups cards by type instead of one
+  // flat list - Bothersome Noisemaker (Creature, qty 2) and Necromancy
+  // (Enchantment, qty 1) and Mountain (Land, qty 8) each land in their own
+  // section of the Maindeck column, with a per-section running total.
+  assert.ok(html.includes(`>Creatures <span class="muted">(2)</span><`));
+  assert.ok(html.includes(`>Enchantments <span class="muted">(1)</span><`));
+  assert.ok(html.includes(`>Lands <span class="muted">(8)</span><`));
+  // Shock (Instant, qty 1) lands in the Sideboard column's own section.
+  assert.ok(html.includes(`>Instants / Sorceries <span class="muted">(1)</span><`));
+  // No card in this fixture falls outside Arena's 7 known types, so the "Other" catch-all never renders.
+  assert.ok(!html.includes(`>Other <span`));
+  assert.ok(html.includes(`class="deck-type-group"`));
 
   // Curve section: buckets should include the Mountain's "Land" label and Bothersome Noisemaker's cmc-2 bucket.
   assert.ok(html.includes("curve-label\">Land<"));
@@ -68,14 +88,21 @@ function run() {
   assert.ok(html.includes("--card-overlap:"));
   // A card with an image gets a real thumbnail plus a quantity badge (only shown above x1), tagged with its creature/spell/land role.
   assert.ok(html.includes(`<img src="https://example.com/img.jpg" alt="Bothersome Noisemaker">`));
-  assert.ok(html.includes("visual-card-qty\">x2<"));
+  // Milestone 15: the quantity badge is the shared .qty-badge class (top-right
+  // of the art, never covered by the next card in a fanned stack) - no more
+  // dedicated .visual-card-qty class positioned at the bottom, which the
+  // overlap used to paint over for every card but the last in its column.
+  assert.ok(html.includes(`qty-badge">x2<`));
+  assert.ok(!html.includes("visual-card-qty"));
+  // A quantity of exactly 1 never gets a badge anywhere on the page.
+  assert.ok(!html.includes(`qty-badge">x1<`));
   assert.ok(/<div class="visual-card" data-role="creature"[^>]*>[\s\S]*?Bothersome Noisemaker/.test(html));
   // A card with no image falls back to a named placeholder box instead of vanishing, with no quantity badge at x1, tagged "spell" (non-creature, non-land).
   assert.ok(html.includes("visual-card-placeholder"));
   assert.ok(/<div class="visual-card" data-role="spell"[^>]*>[\s\S]*?Necromancy/.test(html));
   // Milestone 14: lands are just one more column in the same row, not a separate section - Mountain (x8) shows up there, tagged "land".
   assert.ok(!html.includes("visual-lands"));
-  assert.ok(html.includes("visual-card-qty\">x8<"));
+  assert.ok(html.includes(`qty-badge">x8<`));
   assert.ok(/<div class="visual-card" data-role="land"[^>]*>[\s\S]*?Mountain/.test(html));
   // Milestone 14: no more separate "Creatures"/"Other spells" sub-layout or gap div - same columns always, just a CSS class toggle.
   assert.ok(!html.includes("visual-lands"));
@@ -87,6 +114,16 @@ function run() {
   assert.ok(html.includes(`.visual-section.separated .visual-card[data-role="creature"] + .visual-card[data-role="spell"]`));
   assert.ok(html.includes("toggleVisualSeparate"));
   assert.ok(html.includes(`id="visual-section"`));
+
+  // Milestone 15: hovering in the Visual tab is driven by JS (initVisualHover
+  // toggling .is-hovered), not plain CSS :hover, so a previously-hovered
+  // card's enlarged hit-box can't keep "capturing" the cursor as it moves
+  // down through the rest of an overlapping column - see that function's
+  // comment in the generated <script> for the full rationale.
+  assert.ok(html.includes("function initVisualHover()"));
+  assert.ok(html.includes("is-hovered"));
+  assert.ok(html.includes("getBoundingClientRect"));
+  assert.ok(!html.includes(".visual-card:hover"));
 
   // A custom card-image width (from the Settings window's "Card size" choice) is baked in as the CSS variable instead of the default.
   const wideCards = generateDeckViewerHtml({ ...data, cardImageWidthPx: 210 });
@@ -100,6 +137,8 @@ function run() {
   const withSpecialChars = generateDeckViewerHtml({ ...data, mainDeck: [card({ cardId: 5, name: "<script>alert(1)</script>" })] });
   assert.ok(!withSpecialChars.includes("<script>alert(1)</script>"));
   assert.ok(withSpecialChars.includes("&lt;script&gt;"));
+  // An unrecognized/empty types array (e.g. unenriched data) falls into the "Other" catch-all rather than vanishing or throwing.
+  assert.ok(withSpecialChars.includes(`>Other <span class="muted">(1)</span><`));
 
   // No draft data captured (e.g. not a draft event) - no "Draft" tab button or view at all.
   assert.ok(!html.includes(`data-view="draft"`));
@@ -161,7 +200,7 @@ function run() {
   assert.ok(withPickTwo.includes("2 cards taken this pick"));
 
   console.log(
-    "OK: generateDeckViewerHtml renders header/record/colors, maindeck+sideboard card rows (image or oracle-text hover fallback), curve buckets, the Visual tab's overlapping mana-cost columns (lands as their own column, not a section), the creature/spell 'Separate' toggle's boundary-only CSS rule (not a duplicated layout), configurable card width/overlap, the no-sideboard-captured message, escapes card names, hides the Draft tab with no draft data, renders pack/pick/wheel info when draft data is present, and highlights both cards of a multi-card 'Pick Two' pick.",
+    "OK: generateDeckViewerHtml renders header/record/colors (plus splash colors when present), maindeck+sideboard card rows grouped by type (image or oracle-text hover fallback), curve buckets, the Visual tab's overlapping mana-cost columns (lands as their own column, not a section) with a top-of-art quantity badge shared with the hover preview, JS-driven hover targeting that isn't fooled by an already-elevated card, the creature/spell 'Separate' toggle's boundary-only CSS rule (not a duplicated layout), configurable card width/overlap, the no-sideboard-captured message, escapes card names, hides the Draft tab with no draft data, renders pack/pick/wheel info when draft data is present, and highlights both cards of a multi-card 'Pick Two' pick.",
   );
 }
 

@@ -1,39 +1,37 @@
-// Derives a deck's color identity/combination from its maindeck's cards'
-// Arena-decoded colors (see cards/extractArenaCards.ts's decodeArenaColors) -
-// milestone 7 phase 3. Deliberately plain functions over a cardId->colors
-// map, not a CardStore dependency, so this stays unit-testable without a
-// real database (same convention as rollups.ts/eventHistory.ts).
-
 export type ColorLetter = "W" | "U" | "B" | "R" | "G";
+
 const WUBRG_ORDER: ColorLetter[] = ["W", "U", "B", "R", "G"];
 
 export interface DeckColorProfile {
-  /** This deck's "real" colors, sorted WUBRG - see MIN_CARDS_FOR_COLOR below for what counts. */
   colors: ColorLetter[];
-  /** A stable grouping key: "Colorless", "Mono-W", "UR", "WUBRG", etc. */
   comboKey: string;
-  /** Maindeck card count (by quantity) contributing each color - lets a caller see what got filtered out as a splash. */
   cardCounts: Partial<Record<ColorLetter, number>>;
+  /**
+   * Milestone 15: colors that show up in the maindeck but don't clear
+   * minCardsForColor - a likely splash rather than a real deck color (see
+   * the user's own framing: "if there are two or fewer cards of a color, do
+   * not count it as color of deck ... you can display there color as splash
+   * colors, not a main deck ones"). Always sorted WUBRG, and disjoint from
+   * `colors` - a color is either a main color or a splash, never both.
+   * `cardCounts` already tracked these counts before this field existed
+   * (see deckColors.test.ts); this just names the subset worth calling out
+   * separately for display.
+   */
+  splashColors: ColorLetter[];
 }
 
-/**
- * A color only counts as one of the deck's "real" colors if at least this
- * many maindeck cards (by quantity) contribute it - filters out a single
- * fixing land, hybrid card, or true one-card splash from skewing e.g. a
- * mono-white deck into looking like "WU". Not a perfect heuristic (a
- * genuine 2-card splash won't count either, and this has no way to see mana
- * costs/pips - only which colors a card's identity includes, from Arena's
- * own per-card Colors field), but a simple, documented starting point.
- */
+/** Below this many maindeck cards of a color, it's treated as a splash rather than a deck color - see DeckColorProfile.splashColors. */
 export const MIN_CARDS_FOR_COLOR = 3;
 
 /**
- * `cardColors` maps a card's Arena grpId to its decoded colors (see
- * ArenaCard.colors) - typically built once from CardStore.all() and reused
- * across many decks. Cards missing from the map (e.g. the `cards` table
- * hasn't been refreshed yet) are treated as colorless/unknown rather than
- * throwing, so a stale or partial card catalog degrades gracefully instead
- * of blocking the whole report.
+ * Milestone 7 phase 3: derives a deck's color identity from its maindeck
+ * card list - sums each WUBRG color's card count (a multicolor card
+ * contributes to every color it has), then keeps only colors that clear
+ * `minCardsForColor` as the deck's "real" colors (comboKey/colors);
+ * anything below that bar is still tallied in cardCounts, and, as of
+ * milestone 15, also called out by name in splashColors so callers that
+ * want to show "WU (splash: R)" rather than just silently dropping the
+ * one-off red card can do so.
  */
 export function deriveDeckColors(
   mainDeck: Array<{ cardId: number; quantity: number }>,
@@ -50,11 +48,13 @@ export function deriveDeckColors(
       counts.set(letter, (counts.get(letter) ?? 0) + entry.quantity);
     }
   }
-
   const colors = WUBRG_ORDER.filter((letter) => (counts.get(letter) ?? 0) >= minCardsForColor);
+  const splashColors = WUBRG_ORDER.filter((letter) => {
+    const n = counts.get(letter) ?? 0;
+    return n > 0 && n < minCardsForColor;
+  });
   const comboKey = colors.length === 0 ? "Colorless" : colors.length === 1 ? `Mono-${colors[0]}` : colors.join("");
   const cardCounts: Partial<Record<ColorLetter, number>> = {};
   for (const [letter, n] of counts) cardCounts[letter] = n;
-
-  return { colors, comboKey, cardCounts };
+  return { colors, comboKey, cardCounts, splashColors };
 }

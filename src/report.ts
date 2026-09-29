@@ -283,7 +283,11 @@ function main() {
           for (const c of cardStore.all()) cardColors.set(c.grpId, c.colors);
           cardStore.close();
           const profile = deriveDeckColors(history.deck.mainDeck, cardColors);
-          console.log(`  Colors: ${profile.comboKey}`);
+          // Milestone 15: name splash colors separately rather than silently
+          // folding them into (or dropping them from) the main combo key -
+          // see deckColors.ts's DeckColorProfile.splashColors.
+          const splashNote = profile.splashColors.length > 0 ? ` (splash: ${profile.splashColors.join("")})` : "";
+          console.log(`  Colors: ${profile.comboKey}${splashNote}`);
         } catch {
           // cards table not available - not fatal, just skip the colors line.
         }

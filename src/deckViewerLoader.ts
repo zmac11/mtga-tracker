@@ -22,6 +22,11 @@ import type { DeckViewerData, DraftViewerPick, DraftViewerPickCard, ViewerCard }
  * Optional (defaults to deckViewerHtml.ts's own DEFAULT_CARD_IMAGE_WIDTH_PX)
  * so callers that don't care about card size - e.g. this file's own tests,
  * if any are added later - don't need to pass it.
+ *
+ * Milestone 15 (2026-09-29): calls deriveDeckColors once and threads both
+ * fields it returns that this page cares about - comboKey (unchanged,
+ * still colorCombo) and the new splashColors - through to DeckViewerData,
+ * instead of calling it just for .comboKey and dropping the rest.
  */
 export function buildDeckViewerData(eventId: string, store: TypedEventStore, cardStore: CardStore, cardImageWidthPx?: number): DeckViewerData | null {
   const source = loadEventHistorySource(store);
@@ -56,7 +61,9 @@ export function buildDeckViewerData(eventId: string, store: TypedEventStore, car
 
   const mainDeck = toViewerCards(history.deck?.mainDeck ?? []) ?? [];
   const sideboard = toViewerCards(history.deck?.sideboard ?? null);
-  const colorCombo = history.deck ? deriveDeckColors(history.deck.mainDeck, cardColors).comboKey : "(no deck captured)";
+  const deckColorProfile = history.deck ? deriveDeckColors(history.deck.mainDeck, cardColors) : null;
+  const colorCombo = deckColorProfile?.comboKey ?? "(no deck captured)";
+  const splashColors = deckColorProfile?.splashColors ?? [];
 
   const toDraftCard = (cardId: number): DraftViewerPickCard => {
     const c = cardsById.get(cardId);
@@ -83,6 +90,7 @@ export function buildDeckViewerData(eventId: string, store: TypedEventStore, car
     definitionLabel: history.identity.definitionLabel,
     deckName: history.deck?.deckName ?? null,
     colorCombo,
+    splashColors,
     winRate: history.winRate,
     mainDeck,
     sideboard,

@@ -39,6 +39,30 @@ import { CARD_PREVIEW_CSS, cardPreviewInnerHtml, colorDotsHtml, escapeHtml } fro
  * immediately after that boundary (matched via the `[data-role=creature] +
  * [data-role=spell]` adjacent-sibling selector - no JS reordering, no
  * duplicated markup for the two modes).
+ *
+ * Milestone 15 (2026-09-29): three more user-reported/requested changes -
+ *
+ * 1. The Visual tab's quantity badge used to sit at the bottom-right of each
+ *    card image (`.visual-card-qty`, bottom:4px;right:4px), which is exactly
+ *    the region the *next* card in a fanned/overlapping stack paints over -
+ *    so it was invisible for every card except the last in its column. It
+ *    now uses the shared `.qty-badge` class (see htmlCardHelpers.ts) at the
+ *    top-right of the art instead - the one part of every card that stays
+ *    visible regardless of overlap - and the same badge now also shows up
+ *    on a card's hover-preview ("zoomed") image, everywhere in the app.
+ * 2. Hovering down through an overlapping column could get "stuck" showing
+ *    a previous card's preview - see initVisualHover()'s comment below for
+ *    the root cause (a hovered/elevated card's hit-test box, not just its
+ *    visible sliver, was grabbing the pointer) and its fix.
+ * 3. The "Deck list" tab's Maindeck/Sideboard lists are now grouped into
+ *    type sections (Creatures, Instants / Sorceries, Artifacts,
+ *    Enchantments, Battles, Planeswalkers, Lands, Other) instead of one
+ *    flat alphabetical list - see classifyCardType/CARD_TYPE_* below.
+ *
+ * Also (not a rendering change, but shown in this page's header): the
+ * "Colors" line now calls out splash colors separately from the deck's main
+ * colors - see deckColors.ts's DeckColorProfile.splashColors and this
+ * file's DeckViewerData.splashColors.
  */
 
 export interface ViewerCard {
@@ -86,6 +110,8 @@ export interface DeckViewerData {
   deckName: string | null;
   /** From deckColors.ts's deriveDeckColors().comboKey. */
   colorCombo: string;
+  /** Milestone 15: deckColors.ts's deriveDeckColors().splashColors - colors present but below the main-color threshold, shown separately from colorCombo rather than silently dropped. Optional (defaults to none) for older callers/tests that don't pass it. */
+  splashColors?: string[];
   winRate: { wins: number; losses: number; total: number; pct: string };
   mainDeck: ViewerCard[];
   /** Null when there's no DraftCompleted captured for this run to derive a sideboard from (see eventHistory.ts). */
@@ -109,18 +135,92 @@ function cardRowHtml(card: ViewerCard): string {
     </li>`;
 }
 
+/**
+ * Milestone 15: which "Deck list" tab section a card belongs in, based on
+ * Arena's own decoded `types` (see extractArenaCards.ts's decodeArenaTypes -
+ * always one of exactly these 7 strings, no others exist). This is a
+ * *classification* order (first match wins, for a card with more than one
+ * type) - it's deliberately not the same as CARD_TYPE_DISPLAY_ORDER below,
+ * which is just the order sections are shown in:
+ *
+ * - Land is checked first because a land stays a land for deck-building
+ *   purposes even on the rare card that's also statically some other type
+ *   (e.g. Dryad Arbor, a Land Creature) - it belongs with the other lands,
+ *   not buried in a 1-card "Creatures" section.
+ * - Creature comes next since it's the single most common category, and an
+ *   Artifact Creature / Enchantment Creature reads as a creature first.
+ * - Planeswalker and Battle are checked before the spell/permanent types
+ *   below since they're rare and always worth their own bucket rather than
+ *   vanishing into whatever secondary type they might carry.
+ * - Instant/Sorcery, Artifact, Enchantment are the remaining, mutually
+ *   exclusive base types (a card is never both Instant and Artifact, etc.,
+ *   under Arena's own decoding), so their relative order here doesn't
+ *   actually matter for real cards - listed in the order the user asked
+ *   for the sections to read, for consistency with CARD_TYPE_DISPLAY_ORDER.
+ */
+const CARD_TYPE_CLASSIFICATION_ORDER: Array<{ label: string; match: (types: string[]) => boolean }> = [
+  { label: "Lands", match: (t) => t.includes("Land") },
+  { label: "Creatures", match: (t) => t.includes("Creature") },
+  { label: "Planeswalkers", match: (t) => t.includes("Planeswalker") },
+  { label: "Battles", match: (t) => t.includes("Battle") },
+  { label: "Instants / Sorceries", match: (t) => t.includes("Instant") || t.includes("Sorcery") },
+  { label: "Artifacts", match: (t) => t.includes("Artifact") },
+  { label: "Enchantments", match: (t) => t.includes("Enchantment") },
+];
+
+/** Milestone 15: display order for the "Deck list" tab's grouped sections - the order the user asked for ("Creature, Instant/Sorcery, Artifacts, Enchantments, Battlefields, Planeswalkers and Lands"), independent of the classification priority above. "Other" is a catch-all for a card with none of Arena's 7 known types (unenriched/unrecognized data) - only shown if it's ever non-empty. */
+const CARD_TYPE_DISPLAY_ORDER = ["Creatures", "Instants / Sorceries", "Artifacts", "Enchantments", "Battles", "Planeswalkers", "Lands", "Other"];
+
+function classifyCardType(types: string[]): string {
+  for (const group of CARD_TYPE_CLASSIFICATION_ORDER) {
+    if (group.match(types)) return group.label;
+  }
+  return "Other";
+}
+
+/**
+ * Milestone 15: the "Deck list" tab now groups each column (Maindeck,
+ * Sideboard) into type sections instead of one flat alphabetical list - see
+ * classifyCardType/CARD_TYPE_DISPLAY_ORDER above. Within a section, cards
+ * are still sorted alphabetically exactly as before; only the top-level
+ * grouping is new. A section with no cards is skipped entirely rather than
+ * shown empty.
+ */
 function deckListHtml(title: string, cards: ViewerCard[] | null): string {
   if (cards === null) {
     return `<section class="deck-column"><h2>${escapeHtml(title)}</h2><p class="muted">Not captured for this run (no DraftCompleted event, so the pool/sideboard can't be derived).</p></section>`;
   }
   const totalCount = cards.reduce((n, c) => n + c.quantity, 0);
-  const sorted = [...cards].sort((a, b) => a.name.localeCompare(b.name));
+
+  const byGroup = new Map<string, ViewerCard[]>();
+  for (const c of cards) {
+    const label = classifyCardType(c.types);
+    let group = byGroup.get(label);
+    if (!group) {
+      group = [];
+      byGroup.set(label, group);
+    }
+    group.push(c);
+  }
+
+  const groupsHtml = CARD_TYPE_DISPLAY_ORDER.map((label) => {
+    const group = byGroup.get(label);
+    if (!group || group.length === 0) return "";
+    const groupCount = group.reduce((n, c) => n + c.quantity, 0);
+    const sorted = [...group].sort((a, b) => a.name.localeCompare(b.name));
+    return `
+        <div class="deck-type-group">
+          <h3>${escapeHtml(label)} <span class="muted">(${groupCount})</span></h3>
+          <ul class="card-list">
+            ${sorted.map(cardRowHtml).join("")}
+          </ul>
+        </div>`;
+  }).join("");
+
   return `
     <section class="deck-column">
       <h2>${escapeHtml(title)} <span class="muted">(${totalCount} cards)</span></h2>
-      <ul class="card-list">
-        ${sorted.map(cardRowHtml).join("")}
-      </ul>
+      ${groupsHtml}
     </section>`;
 }
 
@@ -168,9 +268,9 @@ function curveHtml(mainDeck: ViewerCard[]): string {
 /** Milestone 13/14: a card's role within its "Visual" tab column - drives both which sub-group it sorts into (creatures before spells, within a mana-cost column) and the `data-role` attribute the "Separate creatures / spells" toggle's CSS selector keys off (see visualColumnHtml/generateDeckViewerHtml's stylesheet). Lands never split by creature/spell (that distinction isn't meaningful for a land), so they're their own role, unaffected by the toggle either way. */
 type VisualCardRole = "creature" | "spell" | "land";
 
-/** Milestone 13/14: an always-visible card thumbnail for the "Visual" tab - unlike cardRowHtml above, the image itself is the row (not a hover-only preview), fanned into an overlapping stack by the CSS in generateDeckViewerHtml (each card's negative top margin, see `.visual-card`), with a quantity badge for stacks of more than one and a hover panel (reusing cardPreviewInnerHtml, same as every other card in this project) for the enlarged/fallback view. `data-role` is what the creature/spell "Separate" toggle's adjacent-sibling CSS selector matches against - see visualColumnHtml. */
+/** Milestone 13/14/15: an always-visible card thumbnail for the "Visual" tab - unlike cardRowHtml above, the image itself is the row (not a hover-only preview), fanned into an overlapping stack by the CSS in generateDeckViewerHtml (each card's negative top margin, see `.visual-card`), with a quantity badge for stacks of more than one (the shared `.qty-badge` class from htmlCardHelpers.ts - milestone 15 moved this from the bottom-right, which a fanned stack's next card paints over, to the top-right, which never gets covered) and a hover panel (reusing cardPreviewInnerHtml, same as every other card in this project) for the enlarged/fallback view. `data-role` is what the creature/spell "Separate" toggle's adjacent-sibling CSS selector matches against - see visualColumnHtml. Which card is actually "hovered" is driven by JS (see initVisualHover in generateDeckViewerHtml), not plain CSS :hover - `is-hovered` is the class it toggles. */
 function visualCardHtml(card: ViewerCard, role: VisualCardRole): string {
-  const badge = card.quantity > 1 ? `<span class="visual-card-qty">x${card.quantity}</span>` : "";
+  const badge = card.quantity > 1 ? `<span class="qty-badge">x${card.quantity}</span>` : "";
   const inner = card.imageNormal
     ? `<img src="${escapeHtml(card.imageNormal)}" alt="${escapeHtml(card.name)}">`
     : `<div class="visual-card-placeholder">${colorDotsHtml(card.colors)}<span>${escapeHtml(card.name)}</span></div>`;
@@ -294,6 +394,8 @@ export function generateDeckViewerHtml(data: DeckViewerData): string {
   const { wins, losses, total, pct } = data.winRate;
   const recordLine = total > 0 ? `${wins}-${losses} (${pct} over ${total} decided match${total === 1 ? "" : "es"})` : `${wins}-${losses} (no decided matches yet)`;
   const cardImageWidthPx = data.cardImageWidthPx ?? DEFAULT_CARD_IMAGE_WIDTH_PX;
+  const splashColors = data.splashColors ?? [];
+  const splashLine = splashColors.length > 0 ? ` <span class="muted">(splash: ${splashColors.map((c) => escapeHtml(c)).join("")})</span>` : "";
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -315,6 +417,9 @@ export function generateDeckViewerHtml(data: DeckViewerData): string {
   .view.active { display: block; }
   .deck-columns { display: flex; gap: 32px; flex-wrap: wrap; }
   .deck-column { flex: 1 1 320px; min-width: 280px; }
+  .deck-type-group { margin-bottom: 14px; }
+  .deck-type-group:last-child { margin-bottom: 0; }
+  .deck-type-group h3 { font-size: 0.78rem; margin: 0 0 4px; color: #9296a3; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
   .card-list { list-style: none; margin: 0; padding: 0; }
   .card-row { position: relative; display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 4px; cursor: default; }
   .card-row:hover, .card-row:focus { background: #22232c; outline: none; }
@@ -344,16 +449,17 @@ export function generateDeckViewerHtml(data: DeckViewerData): string {
      matching the Arena deck-builder screenshot this tab is modeled on. The
      card lowest in a column's stack is the one shown in full; hovering any
      card lifts it (z-index + a small translateY) above the ones after it so
-     it can be seen whole without leaving the stack. */
+     it can be seen whole without leaving the stack. Milestone 15: "hovering"
+     here means the JS-driven .is-hovered class (see initVisualHover below),
+     not plain CSS :hover - see that function's comment for why. */
   .visual-column-cards { display: flex; flex-direction: column; }
   .visual-card { position: relative; transition: transform 120ms ease; }
   .visual-card:not(:first-child) { margin-top: var(--card-overlap); }
-  .visual-card:hover, .visual-card:focus { z-index: 30; transform: translateY(-6px); }
+  .visual-card.is-hovered, .visual-card:focus { z-index: 30; transform: translateY(-6px); }
   .visual-card img { width: 100%; border-radius: 6px; display: block; box-shadow: 0 2px 6px rgba(0,0,0,0.5); }
-  .visual-card:hover img, .visual-card:focus img { box-shadow: 0 10px 24px rgba(0,0,0,0.65); }
-  .visual-card:hover .preview, .visual-card:focus .preview { display: block; }
+  .visual-card.is-hovered img, .visual-card:focus img { box-shadow: 0 10px 24px rgba(0,0,0,0.65); }
+  .visual-card.is-hovered .preview, .visual-card:focus .preview { display: block; }
   .visual-card-placeholder { width: var(--card-img-width); aspect-ratio: 5 / 7; background: #22232c; border: 1px solid #34364280; border-radius: 6px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 6px; text-align: center; font-size: 0.7rem; }
-  .visual-card-qty { position: absolute; bottom: 4px; right: 4px; background: rgba(0,0,0,0.75); color: #fff; font-size: 0.7rem; font-weight: 600; padding: 1px 5px; border-radius: 4px; z-index: 1; }
   /* "Separate creatures / spells": same layout either way (see the header
      comment) - this just opens a small gap at the one card immediately
      after the last creature in a column, instead of the usual overlap. */
@@ -371,7 +477,7 @@ export function generateDeckViewerHtml(data: DeckViewerData): string {
   <div class="header">
     <h1>${escapeHtml(data.deckName ?? "(no deck submission captured)")}</h1>
     <div class="meta">[${escapeHtml(data.format)}] ${escapeHtml(data.definitionLabel)} &middot; ${escapeHtml(data.eventId)}</div>
-    <div class="meta">Colors: <strong>${escapeHtml(data.colorCombo)}</strong> &middot; Record: <strong>${recordLine}</strong></div>
+    <div class="meta">Colors: <strong>${escapeHtml(data.colorCombo)}</strong>${splashLine} &middot; Record: <strong>${recordLine}</strong></div>
   </div>
 
   <div class="tabs">
@@ -417,6 +523,50 @@ export function generateDeckViewerHtml(data: DeckViewerData): string {
       btn.classList.toggle('active', nowSeparated);
       btn.textContent = nowSeparated ? 'Show combined' : 'Separate creatures / spells';
     }
+    // Milestone 15: the Visual tab's fanned/overlapping card stacks made
+    // plain CSS :hover ambiguous while moving the cursor down a column.
+    // Hovering a card lifts it with a high z-index so its full art shows -
+    // but that elevation makes its *entire* card-height hit-test box (not
+    // just the sliver that's visually its own) paint on top of every card
+    // below it too, so the cursor can keep "hovering" that earlier card even
+    // once it's visually over a later one's face. Fixed by not using :hover
+    // to drive this at all: a per-column mousemove listener figures out
+    // which card the cursor is really over by checking each card's current
+    // rect from the back of the stack forward (later cards paint on top by
+    // default - that's the whole point of the fan - so checking them first
+    // finds the right one regardless of any hover-elevation elsewhere in the
+    // column) and toggles a plain .is-hovered class. While the cursor is over
+    // the open preview panel itself, the handler leaves the active card
+    // alone rather than trying to resolve it against the column's cards (the
+    // preview renders outside the column's own width) - so looking closer at
+    // the zoomed art doesn't dismiss it, and it's never what decides which
+    // card counts as "hovered" either.
+    function initVisualHover() {
+      document.querySelectorAll('.visual-column-cards').forEach(function (col) {
+        var cards = Array.prototype.slice.call(col.querySelectorAll('.visual-card'));
+        var active = null;
+        function setActive(card) {
+          if (active === card) return;
+          if (active) active.classList.remove('is-hovered');
+          active = card;
+          if (active) active.classList.add('is-hovered');
+        }
+        col.addEventListener('mousemove', function (e) {
+          if (e.target && e.target.closest && e.target.closest('.preview')) return;
+          var target = null;
+          for (var i = cards.length - 1; i >= 0; i--) {
+            var rect = cards[i].getBoundingClientRect();
+            if (e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom) {
+              target = cards[i];
+              break;
+            }
+          }
+          setActive(target);
+        });
+        col.addEventListener('mouseleave', function () { setActive(null); });
+      });
+    }
+    initVisualHover();
   </script>
 </body>
 </html>

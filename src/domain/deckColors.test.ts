@@ -1,5 +1,6 @@
 // Coverage for deriveDeckColors (milestone 7 phase 3): the maindeck-colors ->
-// combo-key derivation, including the splash-filtering threshold.
+// combo-key derivation, including the splash-filtering threshold and (as of
+// milestone 15) the splashColors field that names what got filtered out.
 
 import assert from "node:assert/strict";
 import { deriveDeckColors } from "./deckColors.js";
@@ -26,8 +27,9 @@ function run() {
   assert.deepEqual(monoWhiteWithSplash.colors, ["W"]);
   assert.equal(monoWhiteWithSplash.comboKey, "Mono-W");
   assert.equal(monoWhiteWithSplash.cardCounts.R, 1); // tracked even though filtered out of colors/comboKey
+  assert.deepEqual(monoWhiteWithSplash.splashColors, ["R"]); // milestone 15: named as a splash, not just silently dropped
 
-  // A genuine two-color deck: both colors clear the threshold.
+  // A genuine two-color deck: both colors clear the threshold, so neither is a splash.
   const twoColor = deriveDeckColors(
     [
       { cardId: 1, quantity: 8 },
@@ -39,18 +41,34 @@ function run() {
   );
   assert.deepEqual(twoColor.colors, ["W", "U"]); // sorted WUBRG order regardless of input order
   assert.equal(twoColor.comboKey, "WU");
+  assert.deepEqual(twoColor.splashColors, []);
 
   // Fully colorless deck.
   const colorless = deriveDeckColors([{ cardId: 4, quantity: 23 }], cardColors);
   assert.deepEqual(colorless.colors, []);
   assert.equal(colorless.comboKey, "Colorless");
+  assert.deepEqual(colorless.splashColors, []);
 
   // Cards missing from the catalog (e.g. cards table not refreshed) are treated as colorless, not thrown on.
   const unknownCards = deriveDeckColors([{ cardId: 999, quantity: 23 }], cardColors);
   assert.deepEqual(unknownCards.colors, []);
   assert.equal(unknownCards.comboKey, "Colorless");
+  assert.deepEqual(unknownCards.splashColors, []);
 
-  // A custom, lower threshold picks up the splash.
+  // Two separate one-off splashes (e.g. a mono-red deck with a one-off white AND a one-off blue card) both get named, in WUBRG order.
+  const twoSplashes = deriveDeckColors(
+    [
+      { cardId: 3, quantity: 17 }, // R, well above threshold
+      { cardId: 1, quantity: 1 }, // W splash
+      { cardId: 2, quantity: 2 }, // U splash
+    ],
+    cardColors,
+  );
+  assert.deepEqual(twoSplashes.colors, ["R"]);
+  assert.equal(twoSplashes.comboKey, "Mono-R");
+  assert.deepEqual(twoSplashes.splashColors, ["W", "U"]);
+
+  // A custom, lower threshold picks up the splash as a real color instead - it's no longer a splash either.
   const withLowerThreshold = deriveDeckColors(
     [
       { cardId: 1, quantity: 16 },
@@ -61,8 +79,11 @@ function run() {
   );
   assert.deepEqual(withLowerThreshold.colors, ["W", "R"]);
   assert.equal(withLowerThreshold.comboKey, "WR");
+  assert.deepEqual(withLowerThreshold.splashColors, []);
 
-  console.log("OK: deriveDeckColors sums maindeck card colors, filters below-threshold splashes out of the combo, sorts WUBRG, and degrades gracefully for unknown cards.");
+  console.log(
+    "OK: deriveDeckColors sums maindeck card colors, filters below-threshold splashes out of the combo (naming them in splashColors instead of just dropping them), sorts WUBRG, and degrades gracefully for unknown cards.",
+  );
 }
 
 run();
