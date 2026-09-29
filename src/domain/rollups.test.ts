@@ -11,7 +11,7 @@ import { rollupByEventDefinition, rollupBySubtype, rollupByFormat, type MatchOut
 import type { CourseStanding } from "./types.js";
 
 function outcome(eventId: string | null, outcome: "WIN" | "LOSS" | null): MatchOutcome {
-  return { matchId: `m-${Math.random()}`, eventId, opponent: "Opp", outcome, reason: outcome ? "Game" : null };
+  return { matchId: `m-${Math.random()}`, eventId, opponent: "Opp", outcome, reason: outcome ? "Game" : null, ts: `t-${Math.random()}` };
 }
 
 function run() {

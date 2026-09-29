@@ -71,6 +71,7 @@ export class Classifier {
     this.classifyDraftComplete(ev, json, out);
     this.classifyDeckSubmitted(ev, json, out);
     this.classifyCourseStandings(ev, json, out);
+    this.classifyEventClaimPrize(ev, json, out);
     this.classifyMatchRoomState(ev, json, out);
     this.classifyGreGameState(ev, json, out);
     this.classifyAuthenticate(ev, json, out);
@@ -312,6 +313,60 @@ export class Classifier {
         ts: ev.ts,
       });
     }
+  }
+
+  /**
+   * EventClaimPrize response - fires when the player claims an event's
+   * final prize. Confirmed 2026-09-25 from one real captured example
+   * (QuickDraft_HOB_20260915, both request and response), the only claim
+   * captured so far:
+   *
+   *   <== EventClaimPrize(<id>)
+   *   {"Course":{"CourseId":"...","InternalEventName":"QuickDraft_HOB_20260915",
+   *     "CurrentModule":"Complete", ...same per-course shape EventGetCoursesV2
+   *     returns, notably CourseDeck.Sideboard as a real provided array...},
+   *    "InventoryInfo":{"Changes":[{"Source":"EventReward",
+   *      "SourceId":"<courseId>","InventoryGems":650,
+   *      "Boosters":[{"CollationId":100062,"SetCode":"HOB","Count":2}],
+   *      "GrantedCards":[]}], "Gems":6130,"Gold":2175,...}}
+   *
+   * `InventoryInfo`'s top-level Gems/Gold/WildCard* fields are the
+   * player's ACCOUNT-WIDE running totals after the claim, not this
+   * event's reward - the actual per-claim delta is the one entry in
+   * `Changes` where Source === "EventReward" (matched defensively against
+   * SourceId === courseId, in case a claim ever produces more than one
+   * change entry). InventoryGold was absent from the one real example (a
+   * gems+boosters claim, no gold) - see EventReward's own doc comment in
+   * types.ts for why that field is treated as best-effort rather than
+   * fully confirmed. GrantedCards was present but empty, so only its
+   * count is taken here, not any per-card shape.
+   */
+  private classifyEventClaimPrize(ev: ClassifiableEvent, json: Record<string, unknown>, out: DomainEvent[]) {
+    if (ev.method !== "EventClaimPrize" || ev.direction !== "response") return;
+    const course = json.Course;
+    if (!isObj(course) || typeof course.InternalEventName !== "string" || typeof course.CourseId !== "string") return;
+    const inventoryInfo = json.InventoryInfo;
+    if (!isObj(inventoryInfo) || !Array.isArray(inventoryInfo.Changes)) return;
+
+    const rewardChange = inventoryInfo.Changes.find(
+      (c) => isObj(c) && c.Source === "EventReward" && c.SourceId === course.CourseId,
+    );
+    if (!isObj(rewardChange)) return;
+
+    const boosters = Array.isArray(rewardChange.Boosters)
+      ? rewardChange.Boosters.filter(isObj).map((b) => ({ setCode: String(b.SetCode ?? ""), count: Number(b.Count ?? 0) }))
+      : [];
+
+    out.push({
+      kind: "EventReward",
+      eventId: course.InternalEventName,
+      courseId: course.CourseId,
+      gems: Number(rewardChange.InventoryGems ?? 0),
+      gold: Number(rewardChange.InventoryGold ?? 0),
+      boosters,
+      grantedCardCount: Array.isArray(rewardChange.GrantedCards) ? rewardChange.GrantedCards.length : 0,
+      ts: ev.ts,
+    });
   }
 
   private classifyMatchRoomState(ev: ClassifiableEvent, json: Record<string, unknown>, out: DomainEvent[]) {

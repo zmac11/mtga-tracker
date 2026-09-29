@@ -276,7 +276,68 @@ function run() {
   });
   assert.deepEqual((botPickTwoReq[0] as any).grpIds, [100, 200]);
 
-  console.log("OK: classifier handled draft pack/pick/complete, match found/completed, game-state noise filtering, Bot Draft's combined pick+next-pack response, EventGetCoursesV2 standings, and a synthetic 'Pick Two' (2 cards per pick) extension of both draft paths.");
+  // EventClaimPrize response - real shape captured 2026-09-25
+  // (QuickDraft_HOB_20260915), trimmed to the fields classifyEventClaimPrize
+  // actually reads (see its own comment in classifier.ts for the full real
+  // payload). Confirms the reward delta is read from Changes[] (matched on
+  // Source === "EventReward" + SourceId === courseId), NOT from
+  // InventoryInfo's own top-level Gems/Gold (those are account-wide running
+  // totals, deliberately different from this fixture's per-claim numbers,
+  // to catch a regression that reads the wrong field).
+  const c6 = new Classifier();
+  const claim = c6.classify({
+    direction: "response",
+    method: "EventClaimPrize",
+    ts: "p4",
+    json: {
+      Course: {
+        CourseId: "50782680-58e3-44cb-9cba-11aef1e51b24",
+        InternalEventName: "QuickDraft_HOB_20260915",
+        CurrentModule: "Complete",
+      },
+      InventoryInfo: {
+        // Account-wide totals after the claim - must NOT be read as this claim's reward.
+        Gems: 6130,
+        Gold: 2175,
+        Changes: [
+          {
+            Source: "EventReward",
+            SourceId: "50782680-58e3-44cb-9cba-11aef1e51b24",
+            InventoryGems: 650,
+            // InventoryGold intentionally absent - see EventReward's doc comment on why gold defaults to 0.
+            Boosters: [{ CollationId: 100062, SetCode: "HOB", Count: 2 }],
+            GrantedCards: [],
+          },
+        ],
+      },
+    },
+  });
+  assert.equal(claim.length, 1);
+  assert.equal(claim[0].kind, "EventReward");
+  const reward = claim[0] as any;
+  assert.equal(reward.eventId, "QuickDraft_HOB_20260915");
+  assert.equal(reward.courseId, "50782680-58e3-44cb-9cba-11aef1e51b24");
+  assert.equal(reward.gems, 650); // the claim's own delta, not InventoryInfo.Gems's running total
+  assert.equal(reward.gold, 0); // key absent in the real payload - defaults to 0
+  assert.deepEqual(reward.boosters, [{ setCode: "HOB", count: 2 }]);
+  assert.equal(reward.grantedCardCount, 0);
+
+  // A Changes entry from a DIFFERENT course (e.g. a stale/unrelated delta in
+  // the same response) must not be picked up - SourceId has to match this
+  // course's own CourseId.
+  const c7 = new Classifier();
+  const noMatch = c7.classify({
+    direction: "response",
+    method: "EventClaimPrize",
+    ts: "p5",
+    json: {
+      Course: { CourseId: "aaa", InternalEventName: "Other_Event" },
+      InventoryInfo: { Changes: [{ Source: "EventReward", SourceId: "not-aaa", InventoryGems: 100 }] },
+    },
+  });
+  assert.equal(noMatch.length, 0);
+
+  console.log("OK: classifier handled draft pack/pick/complete, match found/completed, game-state noise filtering, Bot Draft's combined pick+next-pack response, EventGetCoursesV2 standings, a synthetic 'Pick Two' (2 cards per pick) extension of both draft paths, and EventClaimPrize's real captured reward shape (including rejecting a SourceId that doesn't match the course).");
 }
 
 run();

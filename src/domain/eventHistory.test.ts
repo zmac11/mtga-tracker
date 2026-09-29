@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { buildEventRunHistory, listEventRuns, type EventHistorySource } from "./eventHistory.js";
 
 function baseSource(): EventHistorySource {
-  return { decks: [], completions: [], picks: [], packsSeen: [], matchFounds: [], matchCompletions: [], courseStandings: [], myScreenName: "Me" };
+  return { decks: [], completions: [], picks: [], packsSeen: [], matchFounds: [], matchCompletions: [], courseStandings: [], joins: [], rewards: [], myScreenName: "Me" };
 }
 
 function run() {
@@ -177,6 +177,72 @@ function run() {
   assert.equal(noStandingHistory.winRate.total, 0);
 
   console.log("OK: buildEventRunHistory's winRate is reconciled against the latest matching CourseStanding (taking the max per side, ignoring stale/unrelated entries), and falls back to the local count when none is captured.");
+
+  // --- Milestone 17: deck versions, entry cost, reward ---
+  // Two deck submissions for the same run (a mid-event edit) - version 1
+  // (deckId "v1") gets one match, version 2 (deckId "v2", content changed)
+  // gets one match after the edit. `deck` (the "current" one) must resolve
+  // to the LATEST submission by ts, not the first .find() match.
+  const versioningSource: EventHistorySource = {
+    ...baseSource(),
+    decks: [
+      { kind: "DeckSubmitted", eventName: "QuickDraft_HOB_20260920", deckId: "v1", deckName: "Draft Deck", mainDeck: [{ cardId: 100, quantity: 23 }], ts: "t1" },
+      // Identical resubmission of the same content, later ts - must NOT count as a third version.
+      { kind: "DeckSubmitted", eventName: "QuickDraft_HOB_20260920", deckId: "v1", deckName: "Draft Deck", mainDeck: [{ cardId: 100, quantity: 23 }], ts: "t1b" },
+      { kind: "DeckSubmitted", eventName: "QuickDraft_HOB_20260920", deckId: "v1", deckName: "Draft Deck", mainDeck: [{ cardId: 200, quantity: 23 }], ts: "t3" },
+      // A version submitted but never played - must not appear in deckVersions.
+      { kind: "DeckSubmitted", eventName: "QuickDraft_HOB_20260920", deckId: "v1", deckName: "Draft Deck", mainDeck: [{ cardId: 300, quantity: 23 }], ts: "t9" },
+    ],
+    matchFounds: [
+      { kind: "MatchFound", matchId: "vm1", eventId: "QuickDraft_HOB_20260920", players: [{ userId: "u1", playerName: "Me", systemSeatId: 1, teamId: 1, courseId: null }, { userId: "u2", playerName: "Opp", systemSeatId: 2, teamId: 2, courseId: null }], ts: "t2" },
+      { kind: "MatchFound", matchId: "vm2", eventId: "QuickDraft_HOB_20260920", players: [{ userId: "u1", playerName: "Me", systemSeatId: 1, teamId: 1, courseId: null }, { userId: "u2", playerName: "Opp", systemSeatId: 2, teamId: 2, courseId: null }], ts: "t4" },
+    ],
+    matchCompletions: [
+      { kind: "MatchCompleted", matchId: "vm1", results: [{ scope: "MatchScope_Match", result: "ResultType_WinLoss", winningTeamId: 1, reason: "ResultReason_Game" }], ts: "t2b" },
+      { kind: "MatchCompleted", matchId: "vm2", results: [{ scope: "MatchScope_Match", result: "ResultType_WinLoss", winningTeamId: 2, reason: "ResultReason_Game" }], ts: "t4b" },
+    ],
+    joins: [{ kind: "DraftJoined", eventName: "QuickDraft_HOB_20260920", entryCurrencyType: "Gems", entryCurrencyPaid: 1500, ts: "t0" }],
+    rewards: [
+      { kind: "EventReward", eventId: "QuickDraft_HOB_20260920", courseId: "course-v", gems: 650, gold: 0, boosters: [{ setCode: "HOB", count: 2 }], grantedCardCount: 0, ts: "t5" },
+    ],
+  };
+
+  const versioningHistory = buildEventRunHistory("QuickDraft_HOB_20260920", versioningSource);
+
+  // "Current" deck resolves to the LATEST submission (t9, cardId 300), not the first (t1).
+  assert.ok(versioningHistory.deck);
+  assert.deepEqual(versioningHistory.deck!.mainDeck, [{ cardId: 300, quantity: 23 }]);
+
+  // Only the two PLAYED versions appear - the t9 resubmission (never played) is excluded.
+  assert.equal(versioningHistory.deckVersions.length, 2);
+  assert.equal(versioningHistory.deckVersions[0].versionNumber, 1);
+  assert.deepEqual(versioningHistory.deckVersions[0].mainDeck, [{ cardId: 100, quantity: 23 }]);
+  assert.equal(versioningHistory.deckVersions[0].matches.length, 1);
+  assert.equal(versioningHistory.deckVersions[0].winRate.wins, 1);
+  assert.equal(versioningHistory.deckVersions[0].winRate.losses, 0);
+
+  assert.equal(versioningHistory.deckVersions[1].versionNumber, 2);
+  assert.deepEqual(versioningHistory.deckVersions[1].mainDeck, [{ cardId: 200, quantity: 23 }]);
+  assert.equal(versioningHistory.deckVersions[1].matches.length, 1);
+  assert.equal(versioningHistory.deckVersions[1].winRate.wins, 0);
+  assert.equal(versioningHistory.deckVersions[1].winRate.losses, 1);
+
+  // The run's OVERALL winRate must be unaffected by the version split - still the total across both matches (1-1), not per-version.
+  assert.equal(versioningHistory.winRate.wins, 1);
+  assert.equal(versioningHistory.winRate.losses, 1);
+
+  assert.deepEqual(versioningHistory.entry, { currencyType: "Gems", amountPaid: 1500 });
+  assert.ok(versioningHistory.reward);
+  assert.equal(versioningHistory.reward!.gems, 650);
+  assert.deepEqual(versioningHistory.reward!.boosters, [{ setCode: "HOB", count: 2 }]);
+
+  // No join/reward captured for a different run -> both null, not thrown.
+  const noExtras = buildEventRunHistory("SomeOtherEvent", versioningSource);
+  assert.equal(noExtras.entry, null);
+  assert.equal(noExtras.reward, null);
+  assert.equal(noExtras.deckVersions.length, 0);
+
+  console.log("OK: buildEventRunHistory resolves the CURRENT deck to the latest submission by ts (not the first), derives deckVersions scoped to only the played/distinct-content versions with their own local win/loss records while leaving the run's overall winRate untouched, and surfaces entry cost + reward when captured.");
 }
 
 run();

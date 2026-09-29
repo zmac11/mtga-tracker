@@ -7,6 +7,8 @@ import { buildEventRunHistory, listEventRuns } from "./domain/eventHistory.js";
 import { loadEventHistorySource } from "./eventHistoryLoader.js";
 import { deriveDeckColors } from "./domain/deckColors.js";
 import { rollupByColorCombo, type RunColorInfo } from "./domain/colorRollup.js";
+import { averageManaValue, type CardCurveInfo } from "./domain/manaCurve.js";
+import { rollupRewardsByFormat, sumRewards, type RewardTotal } from "./domain/rewardRollup.js";
 import { CardStore } from "./cards/cardStore.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -258,6 +260,35 @@ function main() {
     }
   }
 
+  // --- Rewards (milestone 17) ---
+  // "How much have I won" - see EventReward in types.ts/classifier.ts for
+  // where this comes from (EventClaimPrize) and which fields are confirmed
+  // vs. best-effort. Uses the raw store read here rather than
+  // loadEventHistorySource's deduped version since that loader isn't
+  // otherwise needed unless --event was passed - see the block below.
+  {
+    const rewards = dedupeBy(store.all("EventReward"), (r) => `${r.courseId}|${r.ts}`);
+    const formatRewardTotal = (t: RewardTotal): string => {
+      const parts: string[] = [];
+      if (t.gems > 0) parts.push(`${t.gems} Gems`);
+      if (t.gold > 0) parts.push(`${t.gold} Gold`);
+      for (const b of t.boosters) parts.push(`${b.count}x ${b.setCode} Booster${b.count === 1 ? "" : "s"}`);
+      if (t.grantedCardCount > 0) parts.push(`${t.grantedCardCount} card${t.grantedCardCount === 1 ? "" : "s"}`);
+      return parts.length > 0 ? parts.join(", ") : "(none)";
+    };
+
+    console.log("\n=== Rewards ===");
+    if (rewards.length === 0) {
+      console.log("(no EventClaimPrize captures yet - only recorded when a claimed event's prize is actually opened)");
+    } else {
+      console.log(`Total won across ${rewards.length} claim${rewards.length === 1 ? "" : "s"}: ${formatRewardTotal(sumRewards(rewards))}`);
+      const byFormat = rollupRewardsByFormat(rewards);
+      for (const [format, total] of byFormat) {
+        console.log(`  - ${format}: ${formatRewardTotal(total)} (${total.claimCount} claim${total.claimCount === 1 ? "" : "s"})`);
+      }
+    }
+  }
+
   // --- Per-run event history (milestone 7 phase 2) ---
   // `--event=<eventId>` prints one specific run's full history (deck,
   // sideboard, draft pick sequence, matches) - the same data the planned
@@ -291,6 +322,16 @@ function main() {
         } catch {
           // cards table not available - not fatal, just skip the colors line.
         }
+        try {
+          const cardStore = new CardStore(dbPath);
+          const cardCurveInfo = new Map<number, CardCurveInfo>();
+          for (const c of cardStore.all()) cardCurveInfo.set(c.grpId, { types: c.types, manaCost: c.manaCost });
+          cardStore.close();
+          const avgMv = averageManaValue(history.deck.mainDeck, cardCurveInfo);
+          if (avgMv.value !== null) console.log(`  Avg. mana value: ${avgMv.value.toFixed(2)} (${avgMv.consideredCount} of ${avgMv.consideredCount + avgMv.excludedCount} cards considered)`);
+        } catch {
+          // cards table not available - skip, same as the colors block above.
+        }
         console.log(`  Maindeck: ${history.deck.mainDeck.map((c) => `${c.quantity}x ${c.cardId}`).join(", ")}`);
         if (history.deck.sideboard) {
           const sideCount = history.deck.sideboard.reduce((n, x) => n + x.quantity, 0);
@@ -304,6 +345,32 @@ function main() {
       console.log(`Draft picks captured: ${history.picks.length}${history.picks.length > 0 ? ` (pack ${history.picks[0].pack} pick ${history.picks[0].pick} .. pack ${history.picks.at(-1)!.pack} pick ${history.picks.at(-1)!.pick})` : ""}`);
       console.log(`Packs seen captured: ${history.packsSeen.length}`);
       console.log(`Matches: ${history.matches.length} (${history.winRate.wins}-${history.winRate.losses}${history.winRate.total > 0 ? `, ${history.winRate.pct}` : ""})`);
+
+      // Milestone 17: entry cost + reward, both best-effort/absent unless
+      // actually captured (joining/claiming happen at specific moments -
+      // see DraftJoined/EventReward in types.ts).
+      console.log(`Entry: ${history.entry ? `${history.entry.amountPaid} ${history.entry.currencyType}` : "(not captured)"}`);
+      if (history.reward) {
+        const r = history.reward;
+        const parts: string[] = [];
+        if (r.gems > 0) parts.push(`${r.gems} Gems`);
+        if (r.gold > 0) parts.push(`${r.gold} Gold`);
+        for (const b of r.boosters) parts.push(`${b.count}x ${b.setCode} Booster${b.count === 1 ? "" : "s"}`);
+        if (r.grantedCardCount > 0) parts.push(`${r.grantedCardCount} card${r.grantedCardCount === 1 ? "" : "s"}`);
+        console.log(`Reward: ${parts.length > 0 ? parts.join(", ") : "(none)"}`);
+      } else {
+        console.log("Reward: (not captured - only recorded when the prize is actually claimed)");
+      }
+
+      // Milestone 17: every played deck version - see deckVersions.ts. Most
+      // runs will just show one, unplayed (see deriveDeckVersions).
+      if (history.deckVersions.length > 0) {
+        console.log(`Deck versions played: ${history.deckVersions.length}`);
+        for (const v of history.deckVersions) {
+          const { wins, losses, total, pct } = v.winRate;
+          console.log(`  - Version ${v.versionNumber} (submitted ${v.submittedAt}): ${wins}-${losses}${total > 0 ? ` (${pct})` : ""}`);
+        }
+      }
     }
   }
 

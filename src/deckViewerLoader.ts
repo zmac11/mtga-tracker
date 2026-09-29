@@ -5,7 +5,8 @@ import { buildEventRunHistory, listEventRuns } from "./domain/eventHistory.js";
 import { loadEventHistorySource } from "./eventHistoryLoader.js";
 import { deriveDeckColors } from "./domain/deckColors.js";
 import { attributeDraftWheel } from "./domain/draftWheel.js";
-import type { DeckViewerData, DraftViewerPick, DraftViewerPickCard, ViewerCard } from "./deckViewerHtml.js";
+import { averageManaValue, type CardCurveInfo } from "./domain/manaCurve.js";
+import type { DeckViewerData, DeckViewerVersion, DraftViewerPick, DraftViewerPickCard, ViewerCard } from "./deckViewerHtml.js";
 
 /**
  * Thin loader between tracker.db/the cards table and the pure
@@ -65,6 +66,30 @@ export function buildDeckViewerData(eventId: string, store: TypedEventStore, car
   const colorCombo = deckColorProfile?.comboKey ?? "(no deck captured)";
   const splashColors = deckColorProfile?.splashColors ?? [];
 
+  // Milestone 17: average mana value - same cardInfo shape curveHtml/
+  // groupByManaCurve already build from ViewerCards, built here straight
+  // from the raw mainDeck entries (cardsById, not the mapped ViewerCards)
+  // since averageManaValue only needs types/manaCost, not the full card.
+  const cardCurveInfo = new Map<number, CardCurveInfo>();
+  for (const c of cardStore.all()) cardCurveInfo.set(c.grpId, { types: c.types, manaCost: c.manaCost });
+  const avgManaValue = history.deck ? averageManaValue(history.deck.mainDeck, cardCurveInfo) : undefined;
+
+  // Milestone 17: every played deck version, resolved to full ViewerCards
+  // via the same toViewerCards helper the current deck uses above - so a
+  // version in the "Versions" tab renders identically to the "Deck list"
+  // tab, just scoped to that version's own mainDeck/win-loss record.
+  const versions: DeckViewerVersion[] = history.deckVersions.map((v) => ({
+    versionNumber: v.versionNumber,
+    submittedAt: v.submittedAt,
+    winRate: v.winRate,
+    mainDeck: toViewerCards(v.mainDeck) ?? [],
+  }));
+
+  const entry = history.entry ?? null;
+  const reward = history.reward
+    ? { gems: history.reward.gems, gold: history.reward.gold, boosters: history.reward.boosters, grantedCardCount: history.reward.grantedCardCount }
+    : null;
+
   const toDraftCard = (cardId: number): DraftViewerPickCard => {
     const c = cardsById.get(cardId);
     return {
@@ -96,5 +121,9 @@ export function buildDeckViewerData(eventId: string, store: TypedEventStore, car
     sideboard,
     draft,
     ...(cardImageWidthPx !== undefined ? { cardImageWidthPx } : {}),
+    ...(avgManaValue !== undefined ? { avgManaValue } : {}),
+    versions,
+    entry,
+    reward,
   };
 }

@@ -145,6 +145,47 @@ export interface PlayerIdentified {
   ts: string;
 }
 
+/**
+ * What a player actually won by claiming an event's final prize -
+ * EventClaimPrize, confirmed 2026-09-25 from one real captured example
+ * (QuickDraft_HOB_20260915) - see classifyEventClaimPrize's comment for
+ * the full real response shape this is built from. Distinct from
+ * CourseStanding: that's Arena's running win/loss record for a course
+ * while it's still active/recently finished; this is the one-time reward
+ * payout, captured only when the player actually clicks "claim".
+ *
+ * `gold`/`grantedCardCount` are best-effort - see classifyEventClaimPrize
+ * for exactly which parts of this shape are confirmed-from-real-data
+ * versus still unverified.
+ */
+export interface EventReward {
+  kind: "EventReward";
+  /** InternalEventName - same eventId string used everywhere else (CourseStanding, DeckSubmitted, ...). */
+  eventId: string;
+  courseId: string;
+  /** Confirmed real field: gems granted by this specific claim (not a running total - see classifier.ts). */
+  gems: number;
+  /**
+   * Best-effort/unconfirmed: no real captured EventClaimPrize example has
+   * included a nonzero gold reward yet, so the key Arena actually uses for
+   * a gold delta (assumed "InventoryGold", by analogy with the confirmed
+   * "InventoryGems") is unverified. Defaults to 0 - consistent with this
+   * project's already-confirmed "Arena omits zero-valued delta fields"
+   * convention (CurrentLosses, milestone 6) - but treat this specific
+   * number as suspect until a real gold-reward example confirms the key.
+   */
+  gold: number;
+  boosters: Array<{ setCode: string; count: number }>;
+  /**
+   * Best-effort: GrantedCards was present but empty ([]) in the one real
+   * captured example, so its per-item shape (which field holds the card
+   * id) is unconfirmed - this is just a count, not the actual card ids,
+   * until a real example with a granted card is captured.
+   */
+  grantedCardCount: number;
+  ts: string;
+}
+
 export type DomainEvent =
   | DraftJoined
   | DraftPackSeen
@@ -155,4 +196,5 @@ export type DomainEvent =
   | GameStateSnapshot
   | MatchCompleted
   | PlayerIdentified
-  | CourseStanding;
+  | CourseStanding
+  | EventReward;

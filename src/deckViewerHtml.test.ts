@@ -212,8 +212,63 @@ function run() {
   assert.equal((withPickTwo.match(/draft-card-row picked/g) ?? []).length, 2);
   assert.ok(withPickTwo.includes("2 cards taken this pick"));
 
+  // Milestone 17: header extras - avg mana value, entry cost, reward - only
+  // render when actually passed, and are otherwise silently omitted rather
+  // than showing a misleading "0"/"-".
+  assert.ok(!html.includes("Avg. MV:"));
+  assert.ok(!html.includes("Entry:"));
+  assert.ok(!html.includes("Reward:"));
+
+  const withExtras = generateDeckViewerHtml({
+    ...data,
+    avgManaValue: { value: 2.875, consideredCount: 16, excludedCount: 8 },
+    entry: { currencyType: "Gems", amountPaid: 1500 },
+    reward: { gems: 650, gold: 0, boosters: [{ setCode: "HOB", count: 2 }], grantedCardCount: 0 },
+  });
+  assert.ok(withExtras.includes("Avg. MV: <strong>2.88</strong>"));
+  assert.ok(withExtras.includes("Entry: <strong>1500 Gems</strong>"));
+  assert.ok(withExtras.includes("Reward: <strong>650 Gems, 2x HOB Boosters</strong>"));
+
+  // avgManaValue with nothing considered (value: null, e.g. an all-land deck) shows nothing, same as omitted.
+  const nullAvgMv = generateDeckViewerHtml({ ...data, avgManaValue: { value: null, consideredCount: 0, excludedCount: 23 } });
+  assert.ok(!nullAvgMv.includes("Avg. MV:"));
+
+  // A reward with everything at zero (shouldn't really happen, but defensively) - the whole line is omitted, same "nothing to show" treatment as avgManaValue/entry above, rather than an empty "Reward: <strong></strong>".
+  const emptyReward = generateDeckViewerHtml({ ...data, reward: { gems: 0, gold: 0, boosters: [], grantedCardCount: 0 } });
+  assert.ok(!emptyReward.includes("Reward:"));
+
+  // Milestone 17: "Versions" tab - only appears with MORE THAN ONE played version (a single-version run has nothing to compare, so no tab).
+  assert.ok(!html.includes(`data-view="versions"`));
+  assert.ok(!html.includes(">Versions<"));
+
+  const oneVersion = generateDeckViewerHtml({
+    ...data,
+    versions: [{ versionNumber: 1, submittedAt: "t1", winRate: { wins: 4, losses: 2, total: 6, pct: "67%" }, mainDeck: data.mainDeck }],
+  });
+  assert.ok(!oneVersion.includes(`data-view="versions"`));
+
+  const twoVersions = generateDeckViewerHtml({
+    ...data,
+    versions: [
+      { versionNumber: 1, submittedAt: "2026-09-20T10:00:00.000Z", winRate: { wins: 2, losses: 0, total: 2, pct: "100%" }, mainDeck: [card({ cardId: 1, name: "Bothersome Noisemaker", quantity: 2, types: ["Creature"] })] },
+      { versionNumber: 2, submittedAt: "2026-09-21T10:00:00.000Z", winRate: { wins: 1, losses: 2, total: 3, pct: "33%" }, mainDeck: [card({ cardId: 2, name: "Necromancy", quantity: 1, types: ["Enchantment"] })] },
+    ],
+  });
+  assert.ok(twoVersions.includes(`data-view="versions"`));
+  assert.ok(twoVersions.includes(">Versions<"));
+  assert.ok(twoVersions.includes("Version 1"));
+  assert.ok(twoVersions.includes("Version 2"));
+  assert.ok(twoVersions.includes("2026-09-20T10:00:00.000Z"));
+  assert.ok(twoVersions.includes("100%"));
+  assert.ok(twoVersions.includes("33%"));
+  // Each version's own maindeck is rendered (reusing deckListHtml, same as the Deck list tab).
+  assert.ok(twoVersions.includes("Bothersome Noisemaker"));
+  assert.ok(twoVersions.includes("Necromancy"));
+  // The overall header record is still the ORIGINAL data.winRate (4-2), not derived from the versions.
+  assert.ok(twoVersions.includes("4-2"));
+
   console.log(
-    "OK: generateDeckViewerHtml renders header/record/colors (plus splash colors when present), maindeck+sideboard card rows grouped by type (image or oracle-text hover fallback), curve buckets, the Visual tab's overlapping mana-cost columns (lands as their own column, not a section) with a top-of-art quantity badge shared with the hover preview, JS-driven hover targeting that isn't fooled by an already-elevated card, the creature/spell 'Separate' toggle's boundary-only CSS rule (not a duplicated layout), configurable card width/overlap, the no-sideboard-captured message, escapes card names, hides the Draft tab with no draft data, renders pack/pick/wheel info when draft data is present, and highlights both cards of a multi-card 'Pick Two' pick.",
+    "OK: generateDeckViewerHtml renders header/record/colors (plus splash colors when present), maindeck+sideboard card rows grouped by type (image or oracle-text hover fallback), curve buckets, the Visual tab's overlapping mana-cost columns (lands as their own column, not a section) with a top-of-art quantity badge shared with the hover preview, JS-driven hover targeting that isn't fooled by an already-elevated card, the creature/spell 'Separate' toggle's boundary-only CSS rule (not a duplicated layout), configurable card width/overlap, the no-sideboard-captured message, escapes card names, hides the Draft tab with no draft data, renders pack/pick/wheel info when draft data is present, highlights both cards of a multi-card 'Pick Two' pick, shows avg mana value/entry/reward only when captured, and renders a Versions tab only when more than one deck version was actually played, without disturbing the run's overall header record.",
   );
 }
 

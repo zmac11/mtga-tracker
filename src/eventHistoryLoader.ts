@@ -26,7 +26,16 @@ export function loadEventHistorySource(store: TypedEventStore): EventHistorySour
   const identified = store.all("PlayerIdentified");
   const myScreenName = identified.at(-1)?.screenName ?? null;
 
-  const decks = dedupeBy(store.all("DeckSubmitted"), (d) => d.deckId);
+  // Milestone 17: was `(d) => d.deckId` - deckId stays the SAME across a
+  // deck edit (only ts changes), so keying by deckId alone collapsed every
+  // version of a deck down to whichever one happened to win the Map's
+  // last-write-wins pass, throwing away the resubmission history
+  // deriveDeckVersions needs (see eventHistory.ts/deckVersions.ts).
+  // deckId+ts is still a safe natural key for the actual purpose of
+  // dedupeBy here - collapsing an identical raw event that appears twice
+  // because the whole log was replayed (`--from-start`), not real distinct
+  // submissions, which never share both deckId and ts.
+  const decks = dedupeBy(store.all("DeckSubmitted"), (d) => `${d.deckId}|${d.ts}`);
   const completions = dedupeBy(store.all("DraftCompleted"), (c) => c.courseId);
   const picks: DraftPickMade[] = store.all("DraftPickMade"); // buildEventRunHistory dedupes these itself, per (pack, pick), after filtering to a specific draftId
   const packsSeen = store.all("DraftPackSeen");
@@ -36,6 +45,11 @@ export function loadEventHistorySource(store: TypedEventStore): EventHistorySour
   // reads the LATEST entry for a given eventId (see its comment), so
   // repeated/stale snapshots from a replayed log are harmless either way.
   const courseStandings = store.all("CourseStanding");
+  // Milestone 17: entry cost + reward sources - same "replayed log" dedup
+  // concern as the rest of this function, keyed on fields that are unique
+  // per real occurrence but repeat identically on a `--from-start` replay.
+  const joins = dedupeBy(store.all("DraftJoined"), (j) => `${j.eventName}|${j.ts}`);
+  const rewards = dedupeBy(store.all("EventReward"), (r) => `${r.courseId}|${r.ts}`);
 
-  return { decks, completions, picks, packsSeen, matchFounds, matchCompletions, courseStandings, myScreenName };
+  return { decks, completions, picks, packsSeen, matchFounds, matchCompletions, courseStandings, joins, rewards, myScreenName };
 }

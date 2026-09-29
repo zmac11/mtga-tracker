@@ -59,6 +59,46 @@ function bucketLabelFor(info: CardCurveInfo | undefined): string {
 /** Display order for groupByManaCurve's output - low-to-high cost, then Land, then Unknown cost. */
 export const CURVE_BUCKET_ORDER = ["0", "1", "2", "3", "4", "5", "6", "7+", "Land", "Unknown cost"];
 
+export interface AverageManaValue {
+  /** Quantity-weighted average CMC over nonland, known-cost cards - null when there's nothing to average (an empty/all-land/all-unknown deck). */
+  value: number | null;
+  /** Copies (not distinct cards) actually included in the average. */
+  consideredCount: number;
+  /** Copies excluded because they're a land, or have no Scryfall manaCost. */
+  excludedCount: number;
+}
+
+/**
+ * Milestone 17: "average mana value" for a deck's header stat - the other
+ * half of what manaValue() already does per-card, just summed and divided.
+ * Lands are excluded (a land's "cost" isn't meaningful for curve purposes,
+ * same reason groupByManaCurve buckets them separately rather than folding
+ * them into "0"), and a card with no Scryfall enrichment (manaCost === null,
+ * see the file header) is excluded rather than treated as 0, so a handful
+ * of unenriched cards skew the average toward 0 instead of just being
+ * absent from it - excludedCount is how a caller surfaces "this number is
+ * incomplete" if it wants to.
+ */
+export function averageManaValue(mainDeck: Array<{ cardId: number; quantity: number }>, cardInfo: Map<number, CardCurveInfo>): AverageManaValue {
+  let weightedTotal = 0;
+  let consideredCount = 0;
+  let excludedCount = 0;
+  for (const entry of mainDeck) {
+    const info = cardInfo.get(entry.cardId);
+    if (!info || info.types.includes("Land") || info.manaCost === null) {
+      excludedCount += entry.quantity;
+      continue;
+    }
+    weightedTotal += manaValue(info.manaCost) * entry.quantity;
+    consideredCount += entry.quantity;
+  }
+  return {
+    value: consideredCount > 0 ? weightedTotal / consideredCount : null,
+    consideredCount,
+    excludedCount,
+  };
+}
+
 export function groupByManaCurve(mainDeck: Array<{ cardId: number; quantity: number }>, cardInfo: Map<number, CardCurveInfo>): CurveBucket[] {
   const buckets = new Map<string, CurveBucket>();
   for (const entry of mainDeck) {

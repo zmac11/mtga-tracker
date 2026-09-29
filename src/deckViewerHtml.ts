@@ -1,4 +1,4 @@
-import { groupByManaCurve, type CardCurveInfo, type CurveBucket } from "./domain/manaCurve.js";
+import { groupByManaCurve, type AverageManaValue, type CardCurveInfo, type CurveBucket } from "./domain/manaCurve.js";
 import { CARD_PREVIEW_CSS, CARD_PREVIEW_JS, cardPreviewInnerHtml, colorDotsHtml, escapeHtml } from "./htmlCardHelpers.js";
 
 /**
@@ -120,6 +120,30 @@ export interface DeckViewerData {
   draft: DraftViewerPick[];
   /** Milestone 13: card thumbnail width (px) for the "Visual" tab, from the Settings window's "Card size" choice. Defaults to DEFAULT_CARD_IMAGE_WIDTH_PX when omitted (e.g. in older callers/tests). */
   cardImageWidthPx?: number;
+  /** Milestone 17: quantity-weighted average mana value of the maindeck (lands/unenriched cards excluded - see manaCurve.ts's averageManaValue). Optional so older callers/tests that don't pass it still work; a missing value is treated the same as "nothing to show" (undefined value) in the header. */
+  avgManaValue?: AverageManaValue;
+  /** Milestone 17: every played deck version for this run, in submission order - see deckVersions.ts. Empty/omitted for a run with only ever one version (the common case) - the "Versions" tab only appears when there's more than one. */
+  versions?: DeckViewerVersion[];
+  /** Milestone 17: what it cost to join this run (DraftJoined) - null/omitted if not captured. */
+  entry?: { currencyType: string; amountPaid: number } | null;
+  /** Milestone 17: this run's prize claim, if captured - see EventReward in types.ts for which sub-fields are confirmed vs. best-effort. */
+  reward?: DeckViewerReward | null;
+}
+
+/** Milestone 17: one played deck version, already resolved to full ViewerCards (same shape the "Deck list"/"Visual"/"Curve" tabs use) for the "Versions" tab to render with the existing deckListHtml. */
+export interface DeckViewerVersion {
+  versionNumber: number;
+  submittedAt: string;
+  winRate: { wins: number; losses: number; total: number; pct: string };
+  mainDeck: ViewerCard[];
+}
+
+/** Milestone 17: reward summary for one event run's header - see EventReward in types.ts for field provenance (gems/boosters confirmed from real data, gold/grantedCardCount best-effort). */
+export interface DeckViewerReward {
+  gems: number;
+  gold: number;
+  boosters: Array<{ setCode: string; count: number }>;
+  grantedCardCount: number;
 }
 
 /** Milestone 13: the "Visual" tab's default card-thumbnail width, used whenever DeckViewerData.cardImageWidthPx is omitted. Also the fallback main.ts's CARD_SIZE_PRESETS resolves to if the persisted setting is ever missing/invalid. */
@@ -390,12 +414,58 @@ function draftTabHtml(picks: DraftViewerPick[]): string {
   return `<div class="draft-picks">${picks.map(draftPickHtml).join("")}</div>`;
 }
 
+/** Milestone 17: "650 Gems, 2x HOB Boosters" style summary for the header - see DeckViewerReward's own comment for field provenance. Returns null (not shown) rather than an empty string when there's nothing to report, so the caller can decide whether to render the separator around it. */
+function formatReward(reward: DeckViewerReward): string | null {
+  const parts: string[] = [];
+  if (reward.gems > 0) parts.push(`${reward.gems} Gems`);
+  if (reward.gold > 0) parts.push(`${reward.gold} Gold`);
+  for (const b of reward.boosters) parts.push(`${b.count}x ${escapeHtml(b.setCode)} Booster${b.count === 1 ? "" : "s"}`);
+  if (reward.grantedCardCount > 0) parts.push(`${reward.grantedCardCount} card${reward.grantedCardCount === 1 ? "" : "s"}`);
+  return parts.length > 0 ? parts.join(", ") : null;
+}
+
+/**
+ * Milestone 17: the "Versions" tab - one section per played deck version
+ * (see deckVersions.ts), each with its own local win/loss record and its
+ * maindeck rendered with the exact same deckListHtml grouping the "Deck
+ * list" tab uses, so a version reads exactly like that tab does rather
+ * than introducing a second card-list layout. Deliberately does not touch
+ * or restate the run's overall winRate shown in the page header - see
+ * EventRunHistory.winRate's comment in eventHistory.ts for why that total
+ * stays independent of this per-version breakdown.
+ */
+function versionsTabHtml(versions: DeckViewerVersion[]): string {
+  return `<div class="versions-list">${versions
+    .map((v) => {
+      const { wins, losses, total, pct } = v.winRate;
+      const record = total > 0 ? `${wins}-${losses} (${pct} over ${total} decided match${total === 1 ? "" : "es"})` : `${wins}-${losses} (no decided matches yet)`;
+      return `
+        <section class="version-block">
+          <h2>Version ${v.versionNumber} <span class="muted">submitted ${escapeHtml(v.submittedAt)} &middot; ${record}</span></h2>
+          <div class="deck-columns">
+            ${deckListHtml("Maindeck", v.mainDeck)}
+          </div>
+        </section>`;
+    })
+    .join("")}</div>`;
+}
+
 export function generateDeckViewerHtml(data: DeckViewerData): string {
   const { wins, losses, total, pct } = data.winRate;
   const recordLine = total > 0 ? `${wins}-${losses} (${pct} over ${total} decided match${total === 1 ? "" : "es"})` : `${wins}-${losses} (no decided matches yet)`;
   const cardImageWidthPx = data.cardImageWidthPx ?? DEFAULT_CARD_IMAGE_WIDTH_PX;
   const splashColors = data.splashColors ?? [];
   const splashLine = splashColors.length > 0 ? ` <span class="muted">(splash: ${splashColors.map((c) => escapeHtml(c)).join("")})</span>` : "";
+  // Milestone 17: header extras - each renders as its own "&middot; label:
+  // value" fragment, only when there's actually something to show (an
+  // avgManaValue with nothing considered, a missing entry/reward capture,
+  // etc. all just omit their fragment rather than showing a "0"/"-" that
+  // would misleadingly read as a real captured zero).
+  const avgMvLine = data.avgManaValue && data.avgManaValue.value !== null ? ` &middot; Avg. MV: <strong>${data.avgManaValue.value.toFixed(2)}</strong>` : "";
+  const entryLine = data.entry ? ` &middot; Entry: <strong>${data.entry.amountPaid} ${escapeHtml(data.entry.currencyType)}</strong>` : "";
+  const rewardText = data.reward ? formatReward(data.reward) : null;
+  const rewardLine = rewardText ? ` &middot; Reward: <strong>${rewardText}</strong>` : "";
+  const versions = data.versions ?? [];
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -471,13 +541,16 @@ export function generateDeckViewerHtml(data: DeckViewerData): string {
   .draft-card-row.picked .name { color: #6fd57a; font-weight: 600; }
   .picked-badge { color: #6fd57a; flex-shrink: 0; }
   .wheel-line { margin-top: 6px; }
+  .versions-list { display: flex; flex-direction: column; gap: 28px; }
+  .version-block { border-bottom: 1px solid #2a2c36; padding-bottom: 20px; }
+  .version-block:last-child { border-bottom: none; padding-bottom: 0; }
 </style>
 </head>
 <body>
   <div class="header">
     <h1>${escapeHtml(data.deckName ?? "(no deck submission captured)")}</h1>
     <div class="meta">[${escapeHtml(data.format)}] ${escapeHtml(data.definitionLabel)} &middot; ${escapeHtml(data.eventId)}</div>
-    <div class="meta">Colors: <strong>${escapeHtml(data.colorCombo)}</strong>${splashLine} &middot; Record: <strong>${recordLine}</strong></div>
+    <div class="meta">Colors: <strong>${escapeHtml(data.colorCombo)}</strong>${splashLine} &middot; Record: <strong>${recordLine}</strong>${avgMvLine}${entryLine}${rewardLine}</div>
   </div>
 
   <div class="tabs">
@@ -485,6 +558,7 @@ export function generateDeckViewerHtml(data: DeckViewerData): string {
     <button class="tab-btn" data-view="visual" onclick="showView('visual')">Visual</button>
     <button class="tab-btn" data-view="curve" onclick="showView('curve')">Curve</button>
     ${data.draft.length > 0 ? `<button class="tab-btn" data-view="draft" onclick="showView('draft')">Draft</button>` : ""}
+    ${versions.length > 1 ? `<button class="tab-btn" data-view="versions" onclick="showView('versions')">Versions</button>` : ""}
   </div>
 
   <div id="view-list" class="view active" data-view="list">
@@ -506,6 +580,14 @@ export function generateDeckViewerHtml(data: DeckViewerData): string {
     data.draft.length > 0
       ? `<div id="view-draft" class="view" data-view="draft">
     ${draftTabHtml(data.draft)}
+  </div>`
+      : ""
+  }
+
+  ${
+    versions.length > 1
+      ? `<div id="view-versions" class="view" data-view="versions">
+    ${versionsTabHtml(versions)}
   </div>`
       : ""
   }

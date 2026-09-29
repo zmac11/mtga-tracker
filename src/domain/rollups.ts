@@ -13,6 +13,16 @@ export interface MatchOutcome {
   opponent: string;
   outcome: "WIN" | "LOSS" | null; // null = in progress / result not captured
   reason: string | null;
+  /**
+   * Milestone 17: MatchFound.ts, carried through unchanged - lets a
+   * consumer sort/attribute outcomes chronologically (e.g. deckVersions.ts
+   * deciding which deck version was live for a given match) without going
+   * back to the raw MatchFound array. Same "string, sortable via
+   * localeCompare" convention every other domain event's ts already
+   * follows in this codebase (see liveState.ts's activity sort) - not a
+   * new assumption introduced here.
+   */
+  ts: string;
 }
 
 export function computeMatchOutcomes(
@@ -33,7 +43,7 @@ export function computeMatchOutcomes(
       reason = matchResult.reason.replace("ResultReason_", "");
     }
 
-    return { matchId: found.matchId, eventId: found.eventId, opponent: opponent?.playerName ?? "?", outcome, reason };
+    return { matchId: found.matchId, eventId: found.eventId, opponent: opponent?.playerName ?? "?", outcome, reason, ts: found.ts };
   });
 }
 
