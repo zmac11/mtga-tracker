@@ -147,7 +147,7 @@ function run() {
   assert.ok(noSideboard.includes("Not captured for this run"));
 
   // HTML-escapes card names to avoid injecting markup from a (theoretically) untrusted card name.
-  const withSpecialChars = generateDeckViewerHtml({ ...data, mainDeck: [card({ cardId: 5, name: "<script>alert(1)</script>" })] });
+  const withSpecialChars = generateDeckViewerHtml({ ...data, mainDeck: [card({ cardId: 5, name: "<script>alert(1)</script>" })], sideboard: [] });
   assert.ok(!withSpecialChars.includes("<script>alert(1)</script>"));
   assert.ok(withSpecialChars.includes("&lt;script&gt;"));
   // An unrecognized/empty types array (e.g. unenriched data) falls into the "Other" catch-all rather than vanishing or throwing.
@@ -243,15 +243,15 @@ function run() {
 
   const oneVersion = generateDeckViewerHtml({
     ...data,
-    versions: [{ versionNumber: 1, submittedAt: "t1", winRate: { wins: 4, losses: 2, total: 6, pct: "67%" }, mainDeck: data.mainDeck }],
+    versions: [{ versionNumber: 1, submittedAt: "t1", winRate: { wins: 4, losses: 2, total: 6, pct: "67%" }, mainDeck: data.mainDeck, sideboard: [] }],
   });
   assert.ok(!oneVersion.includes(`data-view="versions"`));
 
   const twoVersions = generateDeckViewerHtml({
     ...data,
     versions: [
-      { versionNumber: 1, submittedAt: "2026-09-20T10:00:00.000Z", winRate: { wins: 2, losses: 0, total: 2, pct: "100%" }, mainDeck: [card({ cardId: 1, name: "Bothersome Noisemaker", quantity: 2, types: ["Creature"] })] },
-      { versionNumber: 2, submittedAt: "2026-09-21T10:00:00.000Z", winRate: { wins: 1, losses: 2, total: 3, pct: "33%" }, mainDeck: [card({ cardId: 2, name: "Necromancy", quantity: 1, types: ["Enchantment"] })] },
+      { versionNumber: 1, submittedAt: "2026-09-20T10:00:00.000Z", winRate: { wins: 2, losses: 0, total: 2, pct: "100%" }, mainDeck: [card({ cardId: 1, name: "Bothersome Noisemaker", quantity: 2, types: ["Creature"] })], sideboard: [] },
+      { versionNumber: 2, submittedAt: "2026-09-21T10:00:00.000Z", winRate: { wins: 1, losses: 2, total: 3, pct: "33%" }, mainDeck: [card({ cardId: 2, name: "Necromancy", quantity: 1, types: ["Enchantment"] })], sideboard: [card({ cardId: 3, name: "Sideboard Card", quantity: 1, types: ["Instant"] })] },
     ],
   });
   assert.ok(twoVersions.includes(`data-view="versions"`));
@@ -264,6 +264,8 @@ function run() {
   // Each version's own maindeck is rendered (reusing deckListHtml, same as the Deck list tab).
   assert.ok(twoVersions.includes("Bothersome Noisemaker"));
   assert.ok(twoVersions.includes("Necromancy"));
+  // Milestone 18: each version's own real captured sideboard also renders (version 1's is empty, version 2's has a card).
+  assert.ok(twoVersions.includes("Sideboard Card"));
   // The overall header record is still the ORIGINAL data.winRate (4-2), not derived from the versions.
   assert.ok(twoVersions.includes("4-2"));
 

@@ -82,3 +82,43 @@ export function parseEventIdentity(rawEventName: string): EventIdentity {
     definitionLabel: rawEventName,
   };
 }
+
+/**
+ * Milestone 18: a more reliable format signal than parseEventIdentity's own
+ * `format` (which only ever guesses from the event NAME's text) - prefers
+ * the deck's own real, Arena-supplied Format attribute (DeckSubmitted.format
+ * - confirmed real for "Draft", see its doc comment in types.ts) when one
+ * was captured, falling back to the name-based guess otherwise (a run with
+ * no DeckSubmitted at all has nothing else to go on). Kept as a separate
+ * function rather than folded into parseEventIdentity itself, since
+ * parseEventIdentity only ever takes a bare eventId string (no deck lookup)
+ * and is also what every coarser rollup (rollupByFormat/rollupByEventDefinition
+ * in rollups.ts) groups by - changing what THOSE buckets mean would need
+ * deck data threaded through every one of them, a larger change than this
+ * milestone's ask (deck/version tracking + Sealed pool capture + Bo3
+ * readiness) covers. This is used specifically where a single run's own
+ * format is shown to the user (report.ts's `--event=` detail, the deck
+ * viewer) - see eventHistory.ts's buildEventRunHistory.
+ *
+ * `deckFormat` values seen so far: only "Draft" (real). The mapping below
+ * is a reasoned best-effort covering Arena's known non-limited format names
+ * (Standard/Historic/Explorer/Alchemy/Timeless/Pioneer/Brawl and their
+ * Ranked-prefixed variants) - none of these specific strings have actually
+ * been observed in a real capture yet, only "Draft" and (by the existing
+ * name-based classifyFormat) event names that mention "sealed".
+ */
+export function resolveEventFormat(identity: EventIdentity, deckFormat: string | null | undefined): EventFormat {
+  if (!deckFormat) return identity.format;
+  const f = deckFormat.toLowerCase();
+  if (f.includes("draft")) return "Draft";
+  if (f.includes("sealed")) return "Sealed";
+  if (f === "constructed") return "Constructed";
+  // Known non-limited Arena format names all mean "Constructed" here (this
+  // project doesn't currently distinguish Standard from Historic from Brawl
+  // etc. - see the project doc's open items) - anything that isn't
+  // recognizably Draft/Sealed and isn't blank falls into this bucket,
+  // rather than "Other", since a real Format attribute (as opposed to a
+  // name-based guess) having a value at all means Arena itself considers
+  // this a real deck for a real format.
+  return "Constructed";
+}

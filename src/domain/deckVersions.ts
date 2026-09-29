@@ -31,6 +31,17 @@ export interface DeckVersion {
   deckId: string;
   deckName: string;
   mainDeck: Array<{ cardId: number; quantity: number }>;
+  /**
+   * Milestone 18: the real sideboard captured alongside this specific
+   * submission (DeckSubmitted.sideboard - see its doc comment in types.ts)
+   * - always an array (possibly empty), never derived. Included in what
+   * makes two submissions "the same version" (see deckContentKey below) so
+   * a Constructed player's sideboard-only edit (real postboard tech
+   * between event games, or between separate runs) is tracked as its own
+   * version too, not silently merged into whichever version has the same
+   * maindeck.
+   */
+  sideboard: Array<{ cardId: number; quantity: number }>;
   /** ts of the DeckSubmitted that introduced this version. */
   submittedAt: string;
   /** 1-indexed, in submission order across every version of this run (played or not) - "Version 1" is the deck the event was started with. */
@@ -40,12 +51,23 @@ export interface DeckVersion {
   winRate: WinRate;
 }
 
-/** Order-independent content key for a mainDeck array - two submissions with the same cards/quantities (regardless of array order) are the same version. */
-function deckContentKey(mainDeck: Array<{ cardId: number; quantity: number }>): string {
-  return [...mainDeck]
+/** Order-independent content key for a card list - two lists with the same cards/quantities (regardless of array order) hash the same. */
+function cardListKey(cards: Array<{ cardId: number; quantity: number }>): string {
+  return [...cards]
     .map((e) => `${e.cardId}:${e.quantity}`)
     .sort()
     .join(",");
+}
+
+/**
+ * Milestone 18: a version's identity is its mainDeck AND its sideboard
+ * together - two submissions with the same 40/60/100 but a different
+ * sideboard (a real Constructed scenario: postboard tech between event
+ * games, kept for a later run) are meaningfully different configurations,
+ * not "the same version" just because the maindeck matches.
+ */
+function deckContentKey(mainDeck: Array<{ cardId: number; quantity: number }>, sideboard: Array<{ cardId: number; quantity: number }>): string {
+  return `${cardListKey(mainDeck)}|${cardListKey(sideboard)}`;
 }
 
 /**
@@ -72,7 +94,7 @@ export function deriveDeckVersions(submissions: DeckSubmitted[], matches: MatchO
   const distinct: DeckSubmitted[] = [];
   let lastKey: string | null = null;
   for (const s of sorted) {
-    const key = deckContentKey(s.mainDeck);
+    const key = deckContentKey(s.mainDeck, s.sideboard ?? []);
     if (key !== lastKey) {
       distinct.push(s);
       lastKey = key;
@@ -86,6 +108,7 @@ export function deriveDeckVersions(submissions: DeckSubmitted[], matches: MatchO
     deckId: s.deckId,
     deckName: s.deckName,
     mainDeck: s.mainDeck,
+    sideboard: s.sideboard ?? [],
     submittedAt: s.ts,
     versionNumber: i + 1,
     matches: [],

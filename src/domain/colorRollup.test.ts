@@ -6,7 +6,7 @@ import { rollupByColorCombo, type RunColorInfo } from "./colorRollup.js";
 import type { MatchOutcome } from "./rollups.js";
 
 function outcome(eventId: string, result: "WIN" | "LOSS" | null): MatchOutcome {
-  return { matchId: `m-${Math.random()}`, eventId, opponent: "Opp", outcome: result, reason: result ? "Game" : null, ts: `t-${Math.random()}` };
+  return { matchId: `m-${Math.random()}`, eventId, opponent: "Opp", outcome: result, reason: result ? "Game" : null, ts: `t-${Math.random()}`, games: null };
 }
 
 function run() {

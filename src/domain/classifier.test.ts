@@ -191,10 +191,66 @@ function run() {
   assert.equal(nextPack.pick, 2); // response's PickNumber (1) already points at the next pick
   assert.deepEqual(nextPack.packCards, [103479, 103388, 103494, 103507, 103415]);
 
+  // EventSetDeckV3 response - deck submission. Milestone 18: also captures
+  // the real Sideboard array and the deck's own Format attribute (both
+  // confirmed real 2026-09-29), alongside the already-covered
+  // mainDeck/deckId/deckName. Shape trimmed to the fields that matter from
+  // the real 2026-09-18 capture.
+  const cDeck = new Classifier();
+  const deckSubmitted = cDeck.classify({
+    direction: "response",
+    method: "EventSetDeckV3",
+    ts: "d1",
+    json: {
+      InternalEventName: "ContenderDraft_HOB_20260824",
+      CourseDeckSummary: {
+        DeckId: "d3a913d9-9b13-42df-ad52-8ba886a15117",
+        Name: "Draft Deck",
+        Attributes: [
+          { name: "Version", value: "11" },
+          { name: "Format", value: "Draft" },
+        ],
+      },
+      CourseDeck: {
+        MainDeck: [{ cardId: 100, quantity: 23 }],
+        Sideboard: [{ cardId: 200, quantity: 1 }],
+      },
+    },
+  });
+  assert.equal(deckSubmitted.length, 1);
+  const deckEvent = deckSubmitted[0] as any;
+  assert.equal(deckEvent.deckId, "d3a913d9-9b13-42df-ad52-8ba886a15117");
+  assert.deepEqual(deckEvent.mainDeck, [{ cardId: 100, quantity: 23 }]);
+  assert.deepEqual(deckEvent.sideboard, [{ cardId: 200, quantity: 1 }]);
+  assert.equal(deckEvent.format, "Draft");
+
+  // No Attributes entry named "Format", and no Sideboard array at all - both
+  // handled defensively (null / empty array), the submission isn't rejected.
+  const cDeckBare = new Classifier();
+  const deckBare = cDeckBare.classify({
+    direction: "response",
+    method: "EventSetDeckV3",
+    ts: "d2",
+    json: {
+      InternalEventName: "Event2",
+      CourseDeckSummary: { DeckId: "d2", Name: "Some Deck" },
+      CourseDeck: { MainDeck: [{ cardId: 100, quantity: 1 }] },
+    },
+  });
+  assert.equal((deckBare[0] as any).format, null);
+  assert.deepEqual((deckBare[0] as any).sideboard, []);
+
   // EventGetCoursesV2 - Arena's own authoritative per-event win/loss record.
   // Shape copied from a real live log (2026-09-24), trimmed to the fields
   // that matter; a course with 0 losses (the QuickDraft one, mid-run)
   // genuinely omits "CurrentLosses" entirely rather than sending 0.
+  //
+  // Milestone 18: the QuickDraft course also carries a CardPool - the same
+  // generic field DraftCompleted.cardPool has always come from (confirmed
+  // real; see EventCardPool's doc comment in types.ts) - and must produce a
+  // SEPARATE EventCardPool event alongside its CourseStanding. The Historic
+  // course has no CardPool at all (the normal case for anything non-limited)
+  // and must NOT produce one.
   const c3 = new Classifier();
   const standings = c3.classify({
     direction: "response",
@@ -219,18 +275,25 @@ function run() {
           CourseDeck: { MainDeck: [] },
           CurrentWins: 2,
           // CurrentLosses omitted - real logs omit it entirely at 0, not send 0.
+          CardPool: [100, 100, 200],
         },
       ],
     },
   });
-  assert.equal(standings.length, 2);
-  const historic = standings.find((e: any) => e.eventId === "Historic_Play") as any;
+  const courseStandingsOnly = standings.filter((e) => e.kind === "CourseStanding");
+  assert.equal(courseStandingsOnly.length, 2);
+  const historic = courseStandingsOnly.find((e: any) => e.eventId === "Historic_Play") as any;
   assert.equal(historic.wins, 4);
   assert.equal(historic.losses, 3);
   assert.equal(historic.deckName, "Some Deck");
-  const quickDraft = standings.find((e: any) => e.eventId === "QuickDraft_HOB_20260915") as any;
+  const quickDraft = courseStandingsOnly.find((e: any) => e.eventId === "QuickDraft_HOB_20260915") as any;
   assert.equal(quickDraft.wins, 2);
   assert.equal(quickDraft.losses, 0); // defaulted from the omitted key, not left undefined
+
+  const cardPoolsFromStandings = standings.filter((e) => e.kind === "EventCardPool");
+  assert.equal(cardPoolsFromStandings.length, 1, "only the course that actually had a CardPool produces one");
+  assert.equal((cardPoolsFromStandings[0] as any).eventId, "QuickDraft_HOB_20260915");
+  assert.deepEqual((cardPoolsFromStandings[0] as any).cardPool, [100, 100, 200]);
 
   // "Pick Two" draft (a real Arena format - a smaller pod, e.g. 4 players,
   // where each pick takes 2 cards instead of 1) - NOT yet confirmed against
@@ -294,6 +357,9 @@ function run() {
         CourseId: "50782680-58e3-44cb-9cba-11aef1e51b24",
         InternalEventName: "QuickDraft_HOB_20260915",
         CurrentModule: "Complete",
+        // Milestone 18: same generic CardPool field the EventGetCoursesV2
+        // course above carries - must also produce an EventCardPool here.
+        CardPool: [100, 100, 200],
       },
       InventoryInfo: {
         // Account-wide totals after the claim - must NOT be read as this claim's reward.
@@ -312,15 +378,16 @@ function run() {
       },
     },
   });
-  assert.equal(claim.length, 1);
-  assert.equal(claim[0].kind, "EventReward");
-  const reward = claim[0] as any;
-  assert.equal(reward.eventId, "QuickDraft_HOB_20260915");
-  assert.equal(reward.courseId, "50782680-58e3-44cb-9cba-11aef1e51b24");
-  assert.equal(reward.gems, 650); // the claim's own delta, not InventoryInfo.Gems's running total
-  assert.equal(reward.gold, 0); // key absent in the real payload - defaults to 0
-  assert.deepEqual(reward.boosters, [{ setCode: "HOB", count: 2 }]);
-  assert.equal(reward.grantedCardCount, 0);
+  assert.equal(claim.length, 2);
+  const rewardEvent = claim.find((e) => e.kind === "EventReward") as any;
+  assert.equal(rewardEvent.eventId, "QuickDraft_HOB_20260915");
+  assert.equal(rewardEvent.courseId, "50782680-58e3-44cb-9cba-11aef1e51b24");
+  assert.equal(rewardEvent.gems, 650); // the claim's own delta, not InventoryInfo.Gems's running total
+  assert.equal(rewardEvent.gold, 0); // key absent in the real payload - defaults to 0
+  assert.deepEqual(rewardEvent.boosters, [{ setCode: "HOB", count: 2 }]);
+  assert.equal(rewardEvent.grantedCardCount, 0);
+  const claimCardPool = claim.find((e) => e.kind === "EventCardPool") as any;
+  assert.deepEqual(claimCardPool.cardPool, [100, 100, 200]);
 
   // A Changes entry from a DIFFERENT course (e.g. a stale/unrelated delta in
   // the same response) must not be picked up - SourceId has to match this
@@ -337,7 +404,7 @@ function run() {
   });
   assert.equal(noMatch.length, 0);
 
-  console.log("OK: classifier handled draft pack/pick/complete, match found/completed, game-state noise filtering, Bot Draft's combined pick+next-pack response, EventGetCoursesV2 standings, a synthetic 'Pick Two' (2 cards per pick) extension of both draft paths, and EventClaimPrize's real captured reward shape (including rejecting a SourceId that doesn't match the course).");
+  console.log("OK: classifier handled draft pack/pick/complete, match found/completed, game-state noise filtering, Bot Draft's combined pick+next-pack response, deck submission's real sideboard/format capture, EventGetCoursesV2 standings plus the generic EventCardPool capture from a course's CardPool, a synthetic 'Pick Two' (2 cards per pick) extension of both draft paths, and EventClaimPrize's real captured reward shape (including its own CardPool capture and rejecting a SourceId that doesn't match the course).");
 }
 
 run();

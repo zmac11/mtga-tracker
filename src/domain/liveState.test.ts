@@ -20,7 +20,7 @@ function run() {
   assert.equal(snap.currentDraft, null);
 
   t.record({ kind: "PlayerIdentified", screenName: "Me", clientId: "c1", ts: "t0" });
-  t.record({ kind: "DeckSubmitted", eventName: "Event1", deckId: "d1", deckName: "My Deck", mainDeck: [], ts: "t1" });
+  t.record({ kind: "DeckSubmitted", eventName: "Event1", deckId: "d1", deckName: "My Deck", mainDeck: [], sideboard: [], format: "Draft", ts: "t1" });
 
   t.record({
     kind: "MatchFound",
@@ -61,6 +61,7 @@ function run() {
   assert.equal(snap.match?.me?.life, 15);
   assert.equal(snap.match?.opponent?.life, 18);
   assert.equal(snap.match?.activeSeat, 2);
+  assert.equal(snap.match?.currentGameNumber, 1); // milestone 18 (Bo3 readiness): from the GameStateSnapshot just recorded
 
   t.record({
     kind: "MatchCompleted",
@@ -72,6 +73,7 @@ function run() {
   snap = t.snapshot();
   assert.equal(snap.match?.outcome, "WIN");
   assert.equal(snap.match?.reason, "Concede");
+  assert.equal(snap.match?.games, null); // milestone 18: this fixture's MatchCompleted has no MatchScope_Game entry, only MatchScope_Match
   assert.equal(snap.eventRecord?.wins, 1);
   assert.equal(snap.eventRecord?.losses, 0);
   assert.equal(snap.eventRecord?.pct, "100%");
@@ -183,7 +185,7 @@ function run() {
   const fresh = new LiveStateTracker();
   fresh.record({ kind: "PlayerIdentified", screenName: "Me", clientId: "c1", ts: "h0" });
   fresh.seedHistory([
-    { kind: "DeckSubmitted", eventName: "Event5", deckId: "d5", deckName: "Seeded Deck", mainDeck: [], ts: "h0" },
+    { kind: "DeckSubmitted", eventName: "Event5", deckId: "d5", deckName: "Seeded Deck", mainDeck: [], sideboard: [], format: "Draft", ts: "h0" },
     {
       kind: "MatchFound",
       matchId: "m8",
@@ -299,8 +301,45 @@ function run() {
   const pickTwoSnap = pickTwoDraft.snapshot();
   assert.deepEqual(pickTwoSnap.currentDraft?.picks, [{ pack: 1, pick: 1, grpIds: [1, 2] }]);
 
+  // Milestone 18 (Bo3 readiness): a synthetic Bo3-shaped match - three
+  // MatchScope_Game entries plus one MatchScope_Match entry (same real
+  // resultList structure classifier.ts already captures - see
+  // rollups.test.ts's computeMatchOutcomes coverage for the same shape at
+  // the pure-function level; this checks it actually reaches the overlay
+  // snapshot). currentGameNumber should also track the live game-state's
+  // own gameNumber as it advances.
+  const bo3 = new LiveStateTracker();
+  bo3.record({ kind: "PlayerIdentified", screenName: "Me", clientId: "c-bo3", ts: "b0" });
+  bo3.record({
+    kind: "MatchFound",
+    matchId: "bo3-m1",
+    eventId: "Ladder_Standard_20260101",
+    players: [
+      { userId: "u1", playerName: "Me", systemSeatId: 1, teamId: 1, courseId: null },
+      { userId: "u2", playerName: "Opp", systemSeatId: 2, teamId: 2, courseId: null },
+    ],
+    ts: "b1",
+  });
+  bo3.record({ kind: "GameStateSnapshot", matchId: "bo3-m1", gameNumber: 2, stage: "GameStage_Play", turnActivePlayer: 1, turnDecisionPlayer: 1, players: [], ts: "b2" });
+  assert.equal(bo3.snapshot().match?.currentGameNumber, 2);
+
+  bo3.record({
+    kind: "MatchCompleted",
+    matchId: "bo3-m1",
+    results: [
+      { scope: "MatchScope_Game", result: "ResultType_WinLoss", winningTeamId: 2, reason: "ResultReason_Game" },
+      { scope: "MatchScope_Game", result: "ResultType_WinLoss", winningTeamId: 1, reason: "ResultReason_Game" },
+      { scope: "MatchScope_Game", result: "ResultType_WinLoss", winningTeamId: 1, reason: "ResultReason_Game" },
+      { scope: "MatchScope_Match", result: "ResultType_WinLoss", winningTeamId: 1, reason: "ResultReason_Game" },
+    ],
+    ts: "b3",
+  });
+  const bo3Snap = bo3.snapshot();
+  assert.equal(bo3Snap.match?.outcome, "WIN");
+  assert.deepEqual(bo3Snap.match?.games, { wins: 2, losses: 1 });
+
   console.log(
-    "OK: LiveStateTracker handled match found/game-state/completed, accumulating win rate per event without cross-contamination, reconciled with Arena's own CourseStanding in both directions, seeded correct history at startup without faking a live match, tracked/resumed live draft progress correctly, and carries every card from a multi-card 'Pick Two' pick.",
+    "OK: LiveStateTracker handled match found/game-state/completed, accumulating win rate per event without cross-contamination, reconciled with Arena's own CourseStanding in both directions, seeded correct history at startup without faking a live match, tracked/resumed live draft progress correctly, carries every card from a multi-card 'Pick Two' pick, and (milestone 18) surfaces the live game number and a completed match's own per-game Bo3 score.",
   );
 }
 

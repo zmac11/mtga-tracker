@@ -33,6 +33,18 @@ export interface OverlayMatch {
   stage: string | null;
   outcome: "WIN" | "LOSS" | null; // null while the match is still in progress
   reason: string | null;
+  /**
+   * Milestone 18 (Bo3 readiness): which game of the match is currently
+   * being played, straight from the latest GameStateSnapshot for this
+   * match (gameNumber - already captured since that event type was added,
+   * just not surfaced to the overlay until now). Null before any
+   * GameStateSnapshot has arrived. Always 1 for a Bo1 match (every match
+   * captured so far - see MatchOutcome.games' doc comment in rollups.ts);
+   * expected to go 1 -> 2 -> (3) for a real Bo3, not yet observed live.
+   */
+  currentGameNumber: number | null;
+  /** Milestone 18: the completed match's own per-game score - see MatchOutcome.games in rollups.ts. Null until the match (and its MatchCompleted) is captured. */
+  games: { wins: number; losses: number } | null;
 }
 
 /**
@@ -255,6 +267,8 @@ export class LiveStateTracker {
           stage: gameState?.stage ?? null,
           outcome: outcome?.outcome ?? null,
           reason: outcome?.reason ?? null,
+          currentGameNumber: gameState?.gameNumber ?? null,
+          games: outcome?.games ?? null,
         };
       }
     }

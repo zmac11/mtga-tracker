@@ -136,6 +136,8 @@ export interface DeckViewerVersion {
   submittedAt: string;
   winRate: { wins: number; losses: number; total: number; pct: string };
   mainDeck: ViewerCard[];
+  /** Milestone 18: this version's own real captured sideboard (see DeckVersion.sideboard's doc comment in deckVersions.ts) - always an array (possibly empty), never the "not captured" null the top-level deck's sideboard can be. */
+  sideboard: ViewerCard[];
 }
 
 /** Milestone 17: reward summary for one event run's header - see EventReward in types.ts for field provenance (gems/boosters confirmed from real data, gold/grantedCardCount best-effort). */
@@ -212,7 +214,7 @@ function classifyCardType(types: string[]): string {
  */
 function deckListHtml(title: string, cards: ViewerCard[] | null): string {
   if (cards === null) {
-    return `<section class="deck-column"><h2>${escapeHtml(title)}</h2><p class="muted">Not captured for this run (no DraftCompleted event, so the pool/sideboard can't be derived).</p></section>`;
+    return `<section class="deck-column"><h2>${escapeHtml(title)}</h2><p class="muted">Not captured for this run (no real sideboard was returned with the deck submission, and there's no drafted/opened pool to derive one from either).</p></section>`;
   }
   const totalCount = cards.reduce((n, c) => n + c.quantity, 0);
 
@@ -444,6 +446,7 @@ function versionsTabHtml(versions: DeckViewerVersion[]): string {
           <h2>Version ${v.versionNumber} <span class="muted">submitted ${escapeHtml(v.submittedAt)} &middot; ${record}</span></h2>
           <div class="deck-columns">
             ${deckListHtml("Maindeck", v.mainDeck)}
+            ${deckListHtml("Sideboard", v.sideboard)}
           </div>
         </section>`;
     })

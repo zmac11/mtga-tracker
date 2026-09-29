@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { buildEventRunHistory, listEventRuns, type EventHistorySource } from "./eventHistory.js";
 
 function baseSource(): EventHistorySource {
-  return { decks: [], completions: [], picks: [], packsSeen: [], matchFounds: [], matchCompletions: [], courseStandings: [], joins: [], rewards: [], myScreenName: "Me" };
+  return { decks: [], completions: [], picks: [], packsSeen: [], matchFounds: [], matchCompletions: [], courseStandings: [], joins: [], rewards: [], cardPools: [], myScreenName: "Me" };
 }
 
 function run() {
@@ -19,7 +19,20 @@ function run() {
       { kind: "DraftCompleted", eventName: "ContenderDraft_HOB_20260824", courseId: "course-1", cardPool: [100, 100, 200, 300, 400], draftId: "draft-1", ts: "t0" },
     ],
     decks: [
-      { kind: "DeckSubmitted", eventName: "ContenderDraft_HOB_20260824", deckId: "deck-1", deckName: "My Deck", mainDeck: [{ cardId: 100, quantity: 1 }, { cardId: 200, quantity: 1 }], ts: "t1" },
+      {
+        kind: "DeckSubmitted",
+        eventName: "ContenderDraft_HOB_20260824",
+        deckId: "deck-1",
+        deckName: "My Deck",
+        mainDeck: [{ cardId: 100, quantity: 1 }, { cardId: 200, quantity: 1 }],
+        // Milestone 18: simulates a row captured BEFORE the real sideboard
+        // field existed (Array.isArray(undefined) is false) - this run's
+        // sideboard should come from the legacy cardPool-minus-mainDeck
+        // derivation below, not from an empty "really captured" sideboard.
+        sideboard: undefined as unknown as Array<{ cardId: number; quantity: number }>,
+        format: "Draft",
+        ts: "t1",
+      },
     ],
     picks: [
       // Out of order and with an unconfirmed/confirmed duplicate for the same (pack, pick) - dedup should keep the confirmed one and the final order should be sorted.
@@ -186,12 +199,12 @@ function run() {
   const versioningSource: EventHistorySource = {
     ...baseSource(),
     decks: [
-      { kind: "DeckSubmitted", eventName: "QuickDraft_HOB_20260920", deckId: "v1", deckName: "Draft Deck", mainDeck: [{ cardId: 100, quantity: 23 }], ts: "t1" },
+      { kind: "DeckSubmitted", eventName: "QuickDraft_HOB_20260920", deckId: "v1", deckName: "Draft Deck", mainDeck: [{ cardId: 100, quantity: 23 }], sideboard: [], format: "Draft", ts: "t1" },
       // Identical resubmission of the same content, later ts - must NOT count as a third version.
-      { kind: "DeckSubmitted", eventName: "QuickDraft_HOB_20260920", deckId: "v1", deckName: "Draft Deck", mainDeck: [{ cardId: 100, quantity: 23 }], ts: "t1b" },
-      { kind: "DeckSubmitted", eventName: "QuickDraft_HOB_20260920", deckId: "v1", deckName: "Draft Deck", mainDeck: [{ cardId: 200, quantity: 23 }], ts: "t3" },
+      { kind: "DeckSubmitted", eventName: "QuickDraft_HOB_20260920", deckId: "v1", deckName: "Draft Deck", mainDeck: [{ cardId: 100, quantity: 23 }], sideboard: [], format: "Draft", ts: "t1b" },
+      { kind: "DeckSubmitted", eventName: "QuickDraft_HOB_20260920", deckId: "v1", deckName: "Draft Deck", mainDeck: [{ cardId: 200, quantity: 23 }], sideboard: [], format: "Draft", ts: "t3" },
       // A version submitted but never played - must not appear in deckVersions.
-      { kind: "DeckSubmitted", eventName: "QuickDraft_HOB_20260920", deckId: "v1", deckName: "Draft Deck", mainDeck: [{ cardId: 300, quantity: 23 }], ts: "t9" },
+      { kind: "DeckSubmitted", eventName: "QuickDraft_HOB_20260920", deckId: "v1", deckName: "Draft Deck", mainDeck: [{ cardId: 300, quantity: 23 }], sideboard: [], format: "Draft", ts: "t9" },
     ],
     matchFounds: [
       { kind: "MatchFound", matchId: "vm1", eventId: "QuickDraft_HOB_20260920", players: [{ userId: "u1", playerName: "Me", systemSeatId: 1, teamId: 1, courseId: null }, { userId: "u2", playerName: "Opp", systemSeatId: 2, teamId: 2, courseId: null }], ts: "t2" },
@@ -243,6 +256,84 @@ function run() {
   assert.equal(noExtras.deckVersions.length, 0);
 
   console.log("OK: buildEventRunHistory resolves the CURRENT deck to the latest submission by ts (not the first), derives deckVersions scoped to only the played/distinct-content versions with their own local win/loss records while leaving the run's overall winRate untouched, and surfaces entry cost + reward when captured.");
+
+  // --- Milestone 18: a REAL captured sideboard is preferred over the
+  // derived-from-pool fallback, and is what Constructed relies on entirely
+  // (a Constructed run has no DraftCompleted/cardPool at all - there's
+  // nothing to derive a sideboard FROM). ---
+  const realSideboardSource: EventHistorySource = {
+    ...baseSource(),
+    decks: [
+      {
+        kind: "DeckSubmitted",
+        eventName: "Ladder_Standard_20260101",
+        deckId: "constructed-deck-1",
+        deckName: "Mono Red Aggro",
+        mainDeck: [{ cardId: 100, quantity: 24 }],
+        sideboard: [{ cardId: 999, quantity: 3 }],
+        format: "Standard", // real value never observed yet - see resolveEventFormat's doc comment
+        ts: "t1",
+      },
+    ],
+  };
+  const constructedHistory = buildEventRunHistory("Ladder_Standard_20260101", realSideboardSource);
+  assert.ok(constructedHistory.deck);
+  assert.deepEqual(constructedHistory.deck!.sideboard, [{ cardId: 999, quantity: 3 }]);
+  assert.equal(constructedHistory.cardPool, null, "a Constructed run has no drafted/opened pool at all");
+  assert.equal(constructedHistory.format, "Constructed", "a real Format attribute value maps to the Constructed bucket, not Other");
+
+  // --- Milestone 18: Sealed-shaped run - no DraftCompleted, but a captured
+  // EventCardPool (the generic Course.CardPool capture - see types.ts)
+  // still yields a whole card pool AND, since there's no real sideboard on
+  // this particular submission, a derived-from-pool sideboard exactly the
+  // way Draft's always has. ---
+  const sealedSource: EventHistorySource = {
+    ...baseSource(),
+    decks: [
+      {
+        kind: "DeckSubmitted",
+        eventName: "Sealed_HOB_20260101",
+        deckId: "sealed-deck-1",
+        deckName: "Sealed Deck",
+        mainDeck: [{ cardId: 100, quantity: 1 }],
+        sideboard: undefined as unknown as Array<{ cardId: number; quantity: number }>, // simulates a pre-milestone-18 captured row with no sideboard field at all
+        format: "Sealed",
+        ts: "t1",
+      },
+    ],
+    cardPools: [{ kind: "EventCardPool", eventId: "Sealed_HOB_20260101", courseId: "course-seal", cardPool: [100, 100, 200], ts: "t0" }],
+  };
+  const sealedHistory = buildEventRunHistory("Sealed_HOB_20260101", sealedSource);
+  assert.equal(sealedHistory.cardPool?.length, 3, "the whole opened pool, from EventCardPool since there's no DraftCompleted for Sealed");
+  assert.ok(sealedHistory.deck);
+  const sealedSideboardMap = new Map(sealedHistory.deck!.sideboard!.map((c) => [c.cardId, c.quantity]));
+  assert.equal(sealedSideboardMap.get(100), 1); // pool has 2x card 100, mainDeck used 1 -> 1 left over
+  assert.equal(sealedSideboardMap.get(200), 1);
+  assert.equal(sealedHistory.format, "Sealed");
+
+  // --- Milestone 18: when BOTH a real sideboard and a derivable pool exist
+  // for the same submission, the real one wins outright - no attempt to
+  // reconcile/merge the two. ---
+  const bothSource: EventHistorySource = {
+    ...baseSource(),
+    completions: [{ kind: "DraftCompleted", eventName: "e-both", courseId: "c-both", cardPool: [100, 100, 300], draftId: "d-both", ts: "t0" }],
+    decks: [
+      {
+        kind: "DeckSubmitted",
+        eventName: "e-both",
+        deckId: "deck-both",
+        deckName: "Deck",
+        mainDeck: [{ cardId: 100, quantity: 1 }],
+        sideboard: [{ cardId: 999, quantity: 1 }], // the real one - not [100x1, 300x1], which is what derivation would produce
+        format: "Draft",
+        ts: "t1",
+      },
+    ],
+  };
+  const bothHistory = buildEventRunHistory("e-both", bothSource);
+  assert.deepEqual(bothHistory.deck!.sideboard, [{ cardId: 999, quantity: 1 }]);
+
+  console.log("OK: buildEventRunHistory prefers a real captured sideboard over the derived one even when both are available (and Constructed has nothing to derive from at all), falls back to EventCardPool for a Sealed-shaped run's whole card pool and derived sideboard when no DraftCompleted exists, and resolves format from the deck's own real Format attribute rather than only the event-name guess.");
 }
 
 run();

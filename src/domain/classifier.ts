@@ -257,18 +257,35 @@ export class Classifier {
     this.currentDraftId = null;
   }
 
+  /**
+   * Milestone 18: also captures the real sideboard (deck.Sideboard,
+   * confirmed real 2026-09-29 - see DeckSubmitted's doc comment in
+   * types.ts) and the deck's own Format attribute (summary.Attributes,
+   * entry named "Format" - confirmed real value "Draft"). Both are read
+   * defensively (missing/malformed Attributes just yields format: null,
+   * a non-array Sideboard yields an empty array) rather than rejecting
+   * the whole submission, since neither is required for the rest of this
+   * event to still be useful.
+   */
   private classifyDeckSubmitted(ev: ClassifiableEvent, json: Record<string, unknown>, out: DomainEvent[]) {
     if (ev.method !== "EventSetDeckV3" || ev.direction !== "response") return;
     if (typeof json.InternalEventName !== "string") return;
     const summary = json.CourseDeckSummary;
     const deck = json.CourseDeck;
     if (!isObj(summary) || !isObj(deck) || !Array.isArray(deck.MainDeck)) return;
+
+    const attributes = Array.isArray(summary.Attributes) ? summary.Attributes.filter(isObj) : [];
+    const formatAttr = attributes.find((a) => a.name === "Format");
+    const format = formatAttr && typeof formatAttr.value === "string" ? formatAttr.value : null;
+
     out.push({
       kind: "DeckSubmitted",
       eventName: json.InternalEventName,
       deckId: String(summary.DeckId ?? ""),
       deckName: String(summary.Name ?? ""),
       mainDeck: deck.MainDeck.map((c: any) => ({ cardId: Number(c.cardId), quantity: Number(c.quantity) })),
+      sideboard: Array.isArray(deck.Sideboard) ? deck.Sideboard.map((c: any) => ({ cardId: Number(c.cardId), quantity: Number(c.quantity) })) : [],
+      format,
       ts: ev.ts,
     });
   }
@@ -312,6 +329,22 @@ export class Classifier {
         deckName: isObj(deckSummary) && typeof deckSummary.Name === "string" ? deckSummary.Name : null,
         ts: ev.ts,
       });
+
+      // Milestone 18: same generic Course.CardPool field DraftCompleted
+      // has always read (see EventCardPool's doc comment in types.ts) -
+      // captured here too so a format that never fires DraftCompleteDraft
+      // (chiefly Sealed) still gets its pool recorded, via whichever
+      // course listing happens to include it. Skipped when empty/absent -
+      // most courses (anything non-limited) won't have one at all.
+      if (Array.isArray(course.CardPool) && course.CardPool.length > 0) {
+        out.push({
+          kind: "EventCardPool",
+          eventId: course.InternalEventName,
+          courseId: course.CourseId,
+          cardPool: course.CardPool.map(Number),
+          ts: ev.ts,
+        });
+      }
     }
   }
 
@@ -367,6 +400,19 @@ export class Classifier {
       grantedCardCount: Array.isArray(rewardChange.GrantedCards) ? rewardChange.GrantedCards.length : 0,
       ts: ev.ts,
     });
+
+    // Milestone 18: same generic Course.CardPool capture as
+    // classifyCourseStandings above - EventClaimPrize's own Course also
+    // carries it (see EventCardPool's doc comment in types.ts).
+    if (Array.isArray(course.CardPool) && course.CardPool.length > 0) {
+      out.push({
+        kind: "EventCardPool",
+        eventId: course.InternalEventName,
+        courseId: course.CourseId,
+        cardPool: course.CardPool.map(Number),
+        ts: ev.ts,
+      });
+    }
   }
 
   private classifyMatchRoomState(ev: ClassifiableEvent, json: Record<string, unknown>, out: DomainEvent[]) {

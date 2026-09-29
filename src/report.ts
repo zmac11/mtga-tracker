@@ -121,7 +121,15 @@ function main() {
     console.log("(none captured yet)");
   }
   for (const m of matchOutcomes) {
-    const label = m.outcome ? `${m.outcome} (${m.reason})` : "in progress / result not captured";
+    // Milestone 18 (Bo3 readiness): only show a "(N-M)" game score when
+    // there's more than one game to report - every match captured so far
+    // is Bo1 (see MatchOutcome.games' doc comment in rollups.ts), where
+    // it's always exactly the outcome restated as 1-0/0-1, so omitting it
+    // there keeps every existing report line looking exactly as it always
+    // has (this project's established "don't show an uninteresting number"
+    // convention).
+    const gameScore = m.games && m.games.wins + m.games.losses > 1 ? ` (${m.games.wins}-${m.games.losses})` : "";
+    const label = m.outcome ? `${m.outcome} (${m.reason})${gameScore}` : "in progress / result not captured";
     console.log(`  - vs ${m.opponent} [event: ${m.eventId ?? "?"}] -> ${label}`);
   }
 
@@ -289,6 +297,50 @@ function main() {
     }
   }
 
+  // --- Decks seen, by deck id (milestone 18 - Constructed prep) ---
+  // The user's own question this milestone: is a Constructed deck
+  // identified by name or by some kind of id? Answer: by id - deckId is a
+  // real, client-supplied GUID (confirmed real, see DeckSubmitted's doc
+  // comment in types.ts), not a server-generated per-run id, so it's
+  // expected to be the SAME value every time the player submits "the same
+  // saved deck" to a new event - unlike deckName, which the player can
+  // freely rename without it meaning anything changed. This section groups
+  // every DeckSubmitted ever captured by deckId, listing every eventId
+  // (run) and every distinct deckName it's ever shown up under, so once a
+  // real Constructed event is captured, this is where to check the
+  // hypothesis: does the deck the player used for their last three Ranked
+  // games really show up here as one deckId with three eventIds, or as
+  // three separate ones? (Today's data is Draft-only, where every run gets
+  // its own fresh CourseDeck/deckId by design, so this will correctly show
+  // one deckId per run until a Constructed submission is captured.)
+  {
+    const allDecks = dedupeBy(store.all("DeckSubmitted"), (d) => `${d.deckId}|${d.ts}`);
+    const byDeckId = new Map<string, { names: Set<string>; eventIds: Set<string>; formats: Set<string> }>();
+    for (const d of allDecks) {
+      let entry = byDeckId.get(d.deckId);
+      if (!entry) {
+        entry = { names: new Set(), eventIds: new Set(), formats: new Set() };
+        byDeckId.set(d.deckId, entry);
+      }
+      entry.names.add(d.deckName);
+      entry.eventIds.add(d.eventName);
+      if (d.format) entry.formats.add(d.format);
+    }
+
+    console.log("\n=== Decks seen (by deck id) ===");
+    if (byDeckId.size === 0) {
+      console.log("(no deck submissions captured yet)");
+    }
+    for (const [deckId, { names, eventIds, formats }] of byDeckId) {
+      const nameLabel = [...names].join(" / ");
+      const formatNote = formats.size > 0 ? ` [${[...formats].join("/")}]` : "";
+      console.log(`  - ${deckId}${formatNote}: "${nameLabel}" - played in ${eventIds.size} event run${eventIds.size === 1 ? "" : "s"}`);
+      if (eventIds.size > 1) {
+        for (const id of eventIds) console.log(`      ${id}`);
+      }
+    }
+  }
+
   // --- Per-run event history (milestone 7 phase 2) ---
   // `--event=<eventId>` prints one specific run's full history (deck,
   // sideboard, draft pick sequence, matches) - the same data the planned
@@ -304,10 +356,25 @@ function main() {
     } else {
       const history = buildEventRunHistory(eventId, source);
       console.log(`\n=== Event history: ${eventId} ===`);
-      console.log(`Type: [${history.identity.format}] ${history.identity.definitionLabel}`);
+      // Milestone 18: history.format (resolved from the deck's own real
+      // Format attribute when captured) rather than identity.format (a
+      // name-based guess) - see eventHistory.ts's buildEventRunHistory.
+      console.log(`Type: [${history.format}] ${history.identity.definitionLabel}`);
+      // Milestone 18: the whole opened/drafted pool, when one was captured
+      // (DraftCompleted for Draft, or the newer EventCardPool capture for
+      // Sealed - see types.ts) - "track the whole card pool" for Sealed.
+      if (history.cardPool) {
+        console.log(`Card pool: ${history.cardPool.length} cards captured`);
+      }
       if (history.deck) {
         const mainCount = history.deck.mainDeck.reduce((n, x) => n + x.quantity, 0);
-        console.log(`Deck: "${history.deck.deckName}" (${mainCount} cards)`);
+        // Milestone 18: deckId is Arena's own persistent identifier for this
+        // deck (a client-supplied GUID, confirmed real - see DeckSubmitted's
+        // doc comment in types.ts) - printed here so it's easy to check,
+        // once real Constructed events are captured, whether the same
+        // deckId really does recur across separate runs of the same saved
+        // deck (the open question this milestone's project-doc notes flag).
+        console.log(`Deck: "${history.deck.deckName}" (id ${history.deck.deckId}, ${mainCount} cards)`);
         try {
           const cardStore = new CardStore(dbPath);
           const cardColors = new Map<number, string[]>();

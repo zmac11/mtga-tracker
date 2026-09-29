@@ -50,6 +50,10 @@ export function loadEventHistorySource(store: TypedEventStore): EventHistorySour
   // per real occurrence but repeat identically on a `--from-start` replay.
   const joins = dedupeBy(store.all("DraftJoined"), (j) => `${j.eventName}|${j.ts}`);
   const rewards = dedupeBy(store.all("EventReward"), (r) => `${r.courseId}|${r.ts}`);
+  // Milestone 18: Sealed-pool (and any other non-draft) card pool capture -
+  // see EventCardPool in types.ts. Same replayed-log dedup concern as
+  // joins/rewards above.
+  const cardPools = dedupeBy(store.all("EventCardPool"), (p) => `${p.courseId}|${p.ts}`);
 
-  return { decks, completions, picks, packsSeen, matchFounds, matchCompletions, courseStandings, joins, rewards, myScreenName };
+  return { decks, completions, picks, packsSeen, matchFounds, matchCompletions, courseStandings, joins, rewards, cardPools, myScreenName };
 }

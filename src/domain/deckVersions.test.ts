@@ -8,12 +8,17 @@ import { deriveDeckVersions } from "./deckVersions.js";
 import type { DeckSubmitted } from "./types.js";
 import type { MatchOutcome } from "./rollups.js";
 
-function deck(deckId: string, mainDeck: Array<{ cardId: number; quantity: number }>, ts: string): DeckSubmitted {
-  return { kind: "DeckSubmitted", eventName: "e", deckId, deckName: "Draft Deck", mainDeck, ts };
+function deck(
+  deckId: string,
+  mainDeck: Array<{ cardId: number; quantity: number }>,
+  ts: string,
+  sideboard: Array<{ cardId: number; quantity: number }> = [],
+): DeckSubmitted {
+  return { kind: "DeckSubmitted", eventName: "e", deckId, deckName: "Draft Deck", mainDeck, sideboard, format: "Draft", ts };
 }
 
 function match(matchId: string, ts: string): MatchOutcome {
-  return { matchId, eventId: "e", opponent: "Opp", outcome: "WIN", reason: "ResultReason_Game", ts };
+  return { matchId, eventId: "e", opponent: "Opp", outcome: "WIN", reason: "ResultReason_Game", ts, games: null };
 }
 
 function run() {
@@ -85,7 +90,31 @@ function run() {
   assert.deepEqual(outOfOrder[0].mainDeck, [{ cardId: 1, quantity: 23 }]);
   assert.deepEqual(outOfOrder[1].mainDeck, [{ cardId: 2, quantity: 23 }]);
 
-  console.log("OK: deriveDeckVersions collapses identical-content resubmissions (order-independent), drops any version with zero attributed matches, attributes matches by ts window (falling back to the first version for a match earlier than every submission), and numbers versions by submission time regardless of input array order.");
+  // --- Milestone 18: same mainDeck, different sideboard -> a genuinely
+  // different version (a Constructed postboard change), not collapsed
+  // just because the maindeck matches. ---
+  const sideboardChange = deriveDeckVersions(
+    [
+      deck("d1", [{ cardId: 1, quantity: 23 }], "t1", [{ cardId: 9, quantity: 2 }]),
+      deck("d1", [{ cardId: 1, quantity: 23 }], "t5", [{ cardId: 10, quantity: 2 }]),
+    ],
+    [match("m1", "t2"), match("m2", "t6")],
+  );
+  assert.equal(sideboardChange.length, 2);
+  assert.deepEqual(sideboardChange[0].sideboard, [{ cardId: 9, quantity: 2 }]);
+  assert.deepEqual(sideboardChange[1].sideboard, [{ cardId: 10, quantity: 2 }]);
+
+  // --- Milestone 18: same mainDeck AND same sideboard (order-independent) -> still one version. ---
+  const sameSideboardToo = deriveDeckVersions(
+    [
+      deck("d1", [{ cardId: 1, quantity: 23 }], "t1", [{ cardId: 9, quantity: 1 }, { cardId: 10, quantity: 1 }]),
+      deck("d1", [{ cardId: 1, quantity: 23 }], "t2", [{ cardId: 10, quantity: 1 }, { cardId: 9, quantity: 1 }]),
+    ],
+    [match("m1", "t3")],
+  );
+  assert.equal(sameSideboardToo.length, 1);
+
+  console.log("OK: deriveDeckVersions collapses identical-content resubmissions (order-independent across both mainDeck and, since milestone 18, sideboard), drops any version with zero attributed matches, attributes matches by ts window (falling back to the first version for a match earlier than every submission), numbers versions by submission time regardless of input array order, and treats a sideboard-only change as its own version.");
 }
 
 run();

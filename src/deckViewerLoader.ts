@@ -83,6 +83,11 @@ export function buildDeckViewerData(eventId: string, store: TypedEventStore, car
     submittedAt: v.submittedAt,
     winRate: v.winRate,
     mainDeck: toViewerCards(v.mainDeck) ?? [],
+    // Milestone 18: each version's own real captured sideboard (see
+    // DeckVersion.sideboard's doc comment) - resolved to full ViewerCards
+    // the same way mainDeck is, so the Versions tab can show both, not
+    // just the maindeck.
+    sideboard: toViewerCards(v.sideboard) ?? [],
   }));
 
   const entry = history.entry ?? null;
@@ -111,7 +116,10 @@ export function buildDeckViewerData(eventId: string, store: TypedEventStore, car
 
   return {
     eventId: history.eventId,
-    format: history.identity.format,
+    // Milestone 18: history.format is resolved from the deck's own real
+    // Format attribute when one was captured, not just the event-name
+    // guess identity.format still is - see eventHistory.ts.
+    format: history.format,
     definitionLabel: history.identity.definitionLabel,
     deckName: history.deck?.deckName ?? null,
     colorCombo,

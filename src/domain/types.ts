@@ -93,6 +93,47 @@ export interface DeckSubmitted {
   deckId: string;
   deckName: string;
   mainDeck: Array<{ cardId: number; quantity: number }>;
+  /**
+   * Milestone 18: the real sideboard Arena itself returns alongside the
+   * maindeck in EventSetDeckV3's own response (CourseDeck.Sideboard,
+   * confirmed real 2026-09-29 from the same live log this project's other
+   * shapes come from) - not derived from anything. For a Draft/Sealed run
+   * this is normally "the rest of the drafted/opened pool" (the same cards
+   * eventHistory.ts's older cardPool-minus-mainDeck derivation produces,
+   * now cross-checked against a real value instead of only ever guessed),
+   * but for a Constructed deck it's the ONLY source there is - a
+   * constructed sideboard is whatever 15 cards the player chose from their
+   * whole collection, not "the rest of a limited pool", so there's nothing
+   * to derive it from. Always an array (possibly empty) going forward, not
+   * optional/undefined - a row captured before this field existed will
+   * come back `undefined` at runtime despite the type saying otherwise
+   * (this project's event-sourced storage never migrates old rows - see
+   * eventHistoryLoader.ts's comment on backfill.ts being how a shape
+   * change actually reaches already-captured data); code reading this
+   * field checks `Array.isArray()` rather than assuming it's always set.
+   */
+  sideboard: Array<{ cardId: number; quantity: number }>;
+  /**
+   * Milestone 18: Arena's own player-facing format label for this specific
+   * deck, read from CourseDeckSummary.Attributes (an array of {name,value}
+   * pairs - both the EventSetDeckV3 request's Summary.Attributes and its
+   * response's CourseDeckSummary.Attributes carry the same list; the
+   * response is what's actually classified) by taking the entry whose
+   * `name` is "Format". Confirmed real value: "Draft" (2026-09-18 capture,
+   * the only real submission on record so far). Null when no such
+   * Attributes entry exists in the response at all - not expected in
+   * practice, but treated as absent rather than assumed. This is a far
+   * more reliable format signal than guessing from the event's own name
+   * (see eventIdentity.ts's classifyFormat, kept as a fallback for runs
+   * with no DeckSubmitted at all) - but only the MECHANISM is confirmed
+   * (read Attributes[].value where name === "Format"); the actual string
+   * values a real Constructed deck's Format would contain (expected to be
+   * one of Arena's known format names - Standard, Historic, Explorer,
+   * Alchemy, Timeless, Brawl, or similar) have never been observed, only
+   * "Draft" has. See eventIdentity.ts's resolveEventFormat for how this is
+   * turned into the project's own EventFormat categories.
+   */
+  format: string | null;
   ts: string;
 }
 
@@ -186,6 +227,41 @@ export interface EventReward {
   ts: string;
 }
 
+/**
+ * Milestone 18: a card pool captured from the generic `CardPool` field
+ * Arena already includes on a "Course" object - the same field
+ * DraftCompleted.cardPool has always come from (confirmed real, used
+ * since milestone 4), except read here from wherever else a Course shows
+ * up (EventGetCoursesV2's per-course entries, EventClaimPrize's Course -
+ * see classifier.ts) instead of only from DraftCompleteDraft's response.
+ * This exists specifically for Sealed: a Sealed run never fires
+ * DraftCompleteDraft (there's no draft), so DraftCompleted.cardPool is
+ * never populated for one - but if Sealed's opened pool is delivered
+ * through the same generic Course.CardPool field Draft's course entries
+ * already carry (a reasonable bet, since EventGetCoursesV2/EventClaimPrize
+ * are format-agnostic "list/claim my event runs" endpoints, not
+ * draft-specific ones), this captures it the same way, no new RPC shape
+ * needed.
+ *
+ * Flagged honestly: the FIELD itself (Course.CardPool) is confirmed real
+ * data - draft's own course entries already carry it, redundant with
+ * DraftCompleted.cardPool for that case. What's NOT yet confirmed is that
+ * a real Sealed run's course entry actually populates this same field
+ * with its opened pool - no Sealed event has been captured in this
+ * project's log yet (see the open item in the project's architecture doc).
+ * eventHistory.ts prefers DraftCompleted.cardPool when both exist (the
+ * more specifically-confirmed source) and only falls back to this for a
+ * run that has no DraftCompleted at all.
+ */
+export interface EventCardPool {
+  kind: "EventCardPool";
+  /** InternalEventName - same eventId string used everywhere else. */
+  eventId: string;
+  courseId: string;
+  cardPool: number[];
+  ts: string;
+}
+
 export type DomainEvent =
   | DraftJoined
   | DraftPackSeen
@@ -197,4 +273,5 @@ export type DomainEvent =
   | MatchCompleted
   | PlayerIdentified
   | CourseStanding
-  | EventReward;
+  | EventReward
+  | EventCardPool;

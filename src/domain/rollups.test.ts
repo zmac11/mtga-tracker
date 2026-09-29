@@ -1,17 +1,21 @@
 // Focused coverage for rollupByEventDefinition/rollupBySubtype/rollupByFormat
-// (computeMatchOutcomes/winRate/rollupByEvent/winRateFromCounts are already
-// exercised via liveState.test.ts and classifier.test.ts) - these are the
-// "compaction level" groupings added 2026-09-24 so the user can view their
-// history compacted at whichever granularity they want: one exact event
-// type across all its runs (rollupByEventDefinition), one subtype across
-// every set (rollupBySubtype), or a whole format combined (rollupByFormat).
+// (winRate/rollupByEvent/winRateFromCounts are already exercised via
+// liveState.test.ts and classifier.test.ts) - these are the "compaction
+// level" groupings added 2026-09-24 so the user can view their history
+// compacted at whichever granularity they want: one exact event type across
+// all its runs (rollupByEventDefinition), one subtype across every set
+// (rollupBySubtype), or a whole format combined (rollupByFormat).
+//
+// computeMatchOutcomes itself gets direct coverage below too (milestone 18 -
+// Bo3 readiness's `games` field), rather than only the indirect coverage it
+// already had via liveState.test.ts/eventHistory.test.ts.
 
 import assert from "node:assert/strict";
-import { rollupByEventDefinition, rollupBySubtype, rollupByFormat, type MatchOutcome } from "./rollups.js";
-import type { CourseStanding } from "./types.js";
+import { rollupByEventDefinition, rollupBySubtype, rollupByFormat, computeMatchOutcomes, type MatchOutcome } from "./rollups.js";
+import type { CourseStanding, MatchFound, MatchCompleted } from "./types.js";
 
 function outcome(eventId: string | null, outcome: "WIN" | "LOSS" | null): MatchOutcome {
-  return { matchId: `m-${Math.random()}`, eventId, opponent: "Opp", outcome, reason: outcome ? "Game" : null, ts: `t-${Math.random()}` };
+  return { matchId: `m-${Math.random()}`, eventId, opponent: "Opp", outcome, reason: outcome ? "Game" : null, ts: `t-${Math.random()}`, games: null };
 }
 
 function run() {
@@ -135,5 +139,70 @@ function run() {
 
   console.log("OK: rollupByEventDefinition/rollupBySubtype/rollupByFormat reconcile each contributing run against its own CourseStanding before summing, not the other way around.");
 }
+
+// Milestone 18 (Bo3 readiness): computeMatchOutcomes' `games` field - the
+// individual game-scope results within a match, not just its final
+// outcome. Every match captured for real so far is Bo1 (one
+// MatchScope_Game entry, matching the single MatchScope_Match entry) - no
+// real Bo3 match has ever been captured (see the project doc) - so this
+// exercises both the always-seen Bo1 shape AND a synthetic 2-1 Bo3 shape
+// built from the SAME real resultList structure (an array of
+// {scope,result,winningTeamId,reason} entries, with both game- and
+// match-scoped entries mixed together, exactly as Arena's own
+// finalMatchResult.resultList does - see classifier.ts) to prove the
+// counting logic itself needs no format-specific assumption.
+function runGamesCoverage() {
+  const found: MatchFound = {
+    kind: "MatchFound",
+    matchId: "bo3-m1",
+    eventId: "Ladder_Standard_20260101",
+    players: [
+      { userId: "u1", playerName: "Me", systemSeatId: 1, teamId: 1, courseId: null },
+      { userId: "u2", playerName: "Opp", systemSeatId: 2, teamId: 2, courseId: null },
+    ],
+    ts: "t1",
+  };
+
+  // Bo1 shape (the only one ever actually captured): one game-scope entry,
+  // matching the one match-scope entry.
+  const bo1Completion: MatchCompleted = {
+    kind: "MatchCompleted",
+    matchId: "bo3-m1",
+    results: [
+      { scope: "MatchScope_Game", result: "ResultType_WinLoss", winningTeamId: 1, reason: "ResultReason_Game" },
+      { scope: "MatchScope_Match", result: "ResultType_WinLoss", winningTeamId: 1, reason: "ResultReason_Game" },
+    ],
+    ts: "t2",
+  };
+  const bo1 = computeMatchOutcomes([found], [bo1Completion], "Me");
+  assert.equal(bo1[0].outcome, "WIN");
+  assert.deepEqual(bo1[0].games, { wins: 1, losses: 0 });
+
+  // Synthetic Bo3 shape: I lose game 1, win games 2 and 3, win the match -
+  // three MatchScope_Game entries plus one MatchScope_Match entry, same
+  // structure as the real Bo1 case above, just more of them.
+  const bo3Completion: MatchCompleted = {
+    kind: "MatchCompleted",
+    matchId: "bo3-m1",
+    results: [
+      { scope: "MatchScope_Game", result: "ResultType_WinLoss", winningTeamId: 2, reason: "ResultReason_Game" },
+      { scope: "MatchScope_Game", result: "ResultType_WinLoss", winningTeamId: 1, reason: "ResultReason_Game" },
+      { scope: "MatchScope_Game", result: "ResultType_WinLoss", winningTeamId: 1, reason: "ResultReason_Game" },
+      { scope: "MatchScope_Match", result: "ResultType_WinLoss", winningTeamId: 1, reason: "ResultReason_Game" },
+    ],
+    ts: "t3",
+  };
+  const bo3 = computeMatchOutcomes([found], [bo3Completion], "Me");
+  assert.equal(bo3[0].outcome, "WIN", "overall match outcome is still decided by MatchScope_Match alone, unaffected by this field existing");
+  assert.deepEqual(bo3[0].games, { wins: 2, losses: 1 });
+
+  // No MatchCompleted at all yet (match still in progress) -> games is null, not a wrong count.
+  const inProgress = computeMatchOutcomes([found], [], "Me");
+  assert.equal(inProgress[0].games, null);
+
+  console.log("OK: computeMatchOutcomes' games field correctly tallies per-game results for both the always-seen Bo1 shape (1-0/0-1) and a synthetic Bo3 shape (2-1), leaving the match's own WIN/LOSS outcome (decided by MatchScope_Match alone) unaffected either way, and stays null while the match is still in progress.");
+}
+
+runGamesCoverage();
 
 run();

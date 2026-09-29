@@ -48,14 +48,26 @@ function render({ foundLog, watchingPath, snapshot }) {
 
     if (match.outcome) {
       els.turn.textContent = "";
-      els.outcome.textContent = match.reason ? `${match.outcome} (${match.reason})` : match.outcome;
+      // Milestone 18 (Bo3 readiness): only append a "(N-M)" game score when
+      // there's more than one game to show - a Bo1 match (every match
+      // captured so far) is always exactly 1-0/0-1, which would just
+      // restate the WIN/LOSS text, so it's left out to keep today's
+      // overlay looking exactly as it always has.
+      const games = match.games;
+      const scoreSuffix = games && games.wins + games.losses > 1 ? ` (${games.wins}-${games.losses})` : "";
+      els.outcome.textContent = (match.reason ? `${match.outcome} (${match.reason})` : match.outcome) + scoreSuffix;
       els.outcome.classList.remove("hidden", "win", "loss");
       els.outcome.classList.add(match.outcome === "WIN" ? "win" : "loss");
     } else {
       els.outcome.classList.add("hidden");
       const activeIsMe = match.me && match.activeSeat === match.me.seat;
       const activeIsOpp = match.opponent && match.activeSeat === match.opponent.seat;
-      els.turn.textContent = activeIsMe ? "Your turn" : activeIsOpp ? "Opponent's turn" : "";
+      // Milestone 18: "Game 2"/"Game 3" during a live Bo3 - omitted for
+      // game 1 (the only case that's ever existed so far) so a Bo1 match
+      // in progress still just shows whose turn it is, unchanged.
+      const gameNote = match.currentGameNumber && match.currentGameNumber > 1 ? `Game ${match.currentGameNumber} - ` : "";
+      const turnNote = activeIsMe ? "Your turn" : activeIsOpp ? "Opponent's turn" : "";
+      els.turn.textContent = gameNote && turnNote ? `${gameNote}${turnNote}` : gameNote ? gameNote.replace(/ - $/, "") : turnNote;
     }
   }
 

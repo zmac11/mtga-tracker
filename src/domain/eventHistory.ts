@@ -1,6 +1,6 @@
-import type { DraftPackSeen, DraftPickMade, DeckSubmitted, DraftCompleted, MatchFound, MatchCompleted, CourseStanding, DraftJoined, EventReward } from "./types.js";
+import type { DraftPackSeen, DraftPickMade, DeckSubmitted, DraftCompleted, MatchFound, MatchCompleted, CourseStanding, DraftJoined, EventReward, EventCardPool } from "./types.js";
 import { computeMatchOutcomes, latestStandingByEvent, reconcileWinRate, winRate, type MatchOutcome, type WinRate } from "./rollups.js";
-import { parseEventIdentity, type EventIdentity } from "./eventIdentity.js";
+import { parseEventIdentity, resolveEventFormat, type EventIdentity, type EventFormat } from "./eventIdentity.js";
 import { deriveDeckVersions, type DeckVersion } from "./deckVersions.js";
 
 /**
@@ -20,16 +20,34 @@ export interface EventRunDeck {
   deckName: string;
   mainDeck: Array<{ cardId: number; quantity: number }>;
   /**
-   * Derived, not something Arena sends directly: the drafted pool
-   * (DraftCompleted.cardPool) minus whatever's in mainDeck, by grpId count.
-   * Null when there's no DraftCompleted for this run to derive it from
-   * (deck submission alone doesn't tell us the rest of the pool).
+   * Milestone 18: prefers the REAL sideboard Arena returned with the deck
+   * submission itself (DeckSubmitted.sideboard - see its doc comment in
+   * types.ts) when one was captured - which is now the normal case for any
+   * submission captured after this milestone, and the ONLY possible source
+   * for a Constructed deck (there's no pool to derive one from). Falls
+   * back to the older derivation (drafted/opened pool minus mainDeck, by
+   * grpId count - using DraftCompleted.cardPool or, since milestone 18,
+   * EventCardPool for a non-draft pool source like Sealed) only for a
+   * submission captured before the real sideboard field existed. Null when
+   * neither a real sideboard nor a pool to derive one from is available.
    */
   sideboard: Array<{ cardId: number; quantity: number }> | null;
 }
 
 export interface EventRunHistory {
   identity: EventIdentity;
+  /**
+   * Milestone 18: this run's format, resolved via resolveEventFormat -
+   * prefers the deck's own real Format attribute over identity.format's
+   * name-based guess when a deck was captured. Distinct from
+   * identity.format on purpose: identity.format is also what the coarser
+   * cross-run rollups (rollupByFormat/rollupByEventDefinition in
+   * rollups.ts) group by, and changing THEIR bucketing to be deck-aware
+   * would need deck data threaded through those too - out of scope for
+   * this milestone (see the project doc). This field is for a single run's
+   * own display (report.ts's --event= detail, the deck viewer) only.
+   */
+  format: EventFormat;
   eventId: string;
   deck: EventRunDeck | null;
   /** Full drafted card pool (grpIds, duplicates included e.g. for basics), from DraftCompleted - null if not captured for this run. */
@@ -81,6 +99,8 @@ export interface EventHistorySource {
   joins: DraftJoined[];
   /** Milestone 17: prize-claim source (EventClaimPrize - see classifier.ts/types.ts). Not pre-filtered/deduped. */
   rewards: EventReward[];
+  /** Milestone 18: Sealed (and any other non-draft) card-pool source - see EventCardPool in types.ts. Not pre-filtered/deduped; buildEventRunHistory picks the latest for a given eventId itself, same convention as courseStandings below. */
+  cardPools: EventCardPool[];
   /**
    * Arena's own authoritative win/loss snapshots (milestone 6's backstop -
    * see CourseStanding in types.ts), added in milestone 12 so a per-run
@@ -138,12 +158,30 @@ export function buildEventRunHistory(eventId: string, source: EventHistorySource
   const packsForRun = source.packsSeen.filter((p) => p.draftId === draftId);
   const packsSeen = dedupeLatestByKey(packsForRun, (p) => `${p.pack}|${p.pick}`).sort((a, b) => a.pack - b.pack || a.pick - b.pick);
 
+  // Milestone 18: Sealed (and anything else with no DraftCompleted) falls
+  // back to the generic EventCardPool capture - see its doc comment in
+  // types.ts. Latest-by-ts wins, same "keep only the latest snapshot"
+  // convention as courseStandings/latestStandingByEvent (a pool shouldn't
+  // actually change once granted, but this is the safe choice either way).
+  const cardPoolsForRun = source.cardPools.filter((p) => p.eventId === eventId);
+  const latestCardPool = cardPoolsForRun.length > 0 ? [...cardPoolsForRun].sort((a, b) => a.ts.localeCompare(b.ts)).at(-1)! : null;
+  const poolForSideboard = completion?.cardPool ?? latestCardPool?.cardPool ?? null;
+
   let deck: EventRunDeck | null = null;
   if (deckSubmission) {
     let sideboard: Array<{ cardId: number; quantity: number }> | null = null;
-    if (completion) {
+    if (Array.isArray(deckSubmission.sideboard)) {
+      // Milestone 18: the real thing, straight from the submission itself -
+      // see EventRunDeck's doc comment for why this is preferred over the
+      // derived fallback below.
+      sideboard = deckSubmission.sideboard;
+    } else if (poolForSideboard) {
+      // Legacy fallback, for a submission captured before the real
+      // sideboard field existed: derive it from whichever pool we have
+      // (drafted, via DraftCompleted, or opened, via EventCardPool) minus
+      // whatever's in mainDeck, by grpId count.
       const poolCounts = new Map<number, number>();
-      for (const grpId of completion.cardPool) poolCounts.set(grpId, (poolCounts.get(grpId) ?? 0) + 1);
+      for (const grpId of poolForSideboard) poolCounts.set(grpId, (poolCounts.get(grpId) ?? 0) + 1);
       for (const entry of deckSubmission.mainDeck) {
         poolCounts.set(entry.cardId, (poolCounts.get(entry.cardId) ?? 0) - entry.quantity);
       }
@@ -187,9 +225,10 @@ export function buildEventRunHistory(eventId: string, source: EventHistorySource
 
   return {
     identity,
+    format: resolveEventFormat(identity, deckSubmission?.format),
     eventId,
     deck,
-    cardPool: completion?.cardPool ?? null,
+    cardPool: poolForSideboard,
     picks,
     packsSeen,
     matches,

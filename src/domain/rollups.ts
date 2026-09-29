@@ -23,6 +23,25 @@ export interface MatchOutcome {
    * new assumption introduced here.
    */
   ts: string;
+  /**
+   * Milestone 18 (Bo3 readiness): the individual GAME results within this
+   * match, not just the match's own final outcome - null when no
+   * MatchScope_Game entries were captured (match still in progress, or no
+   * MatchCompleted at all yet). For a Bo1 match this is always {wins:1,
+   * losses:0} or {wins:0,losses:1} (one game IS the whole match) - the
+   * data to compute this has been captured since MatchCompleted was first
+   * added (Arena's own finalMatchResult.resultList already includes one
+   * MatchScope_Game entry per game alongside the MatchScope_Match entry -
+   * confirmed real, see classifier.ts), it just wasn't being counted
+   * separately until now. A real Bo3 match has never been captured yet
+   * (every match on record so far is Bo1 - matchWinCondition has only ever
+   * been observed as MatchWinCondition_SingleElimination), so this is
+   * validated against the always-1-game Bo1 shape only; the counting logic
+   * itself needs no format-specific assumption (it just tallies whichever
+   * MatchScope_Game entries exist), so it should generalize correctly to a
+   * real 2-1/2-0 Bo3 result once one is captured.
+   */
+  games: { wins: number; losses: number } | null;
 }
 
 export function computeMatchOutcomes(
@@ -43,7 +62,16 @@ export function computeMatchOutcomes(
       reason = matchResult.reason.replace("ResultReason_", "");
     }
 
-    return { matchId: found.matchId, eventId: found.eventId, opponent: opponent?.playerName ?? "?", outcome, reason, ts: found.ts };
+    let games: { wins: number; losses: number } | null = null;
+    if (me && completion) {
+      const gameResults = completion.results.filter((r) => r.scope === "MatchScope_Game");
+      if (gameResults.length > 0) {
+        const wins = gameResults.filter((r) => r.winningTeamId === me.teamId).length;
+        games = { wins, losses: gameResults.length - wins };
+      }
+    }
+
+    return { matchId: found.matchId, eventId: found.eventId, opponent: opponent?.playerName ?? "?", outcome, reason, ts: found.ts, games };
   });
 }
 
