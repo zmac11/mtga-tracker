@@ -1,4 +1,4 @@
-import { CARD_PREVIEW_CSS, cardPreviewInnerHtml, colorDotsHtml, escapeHtml } from "./htmlCardHelpers.js";
+import { CARD_PREVIEW_CSS, CARD_PREVIEW_JS, cardPreviewInnerHtml, colorDotsHtml, escapeHtml } from "./htmlCardHelpers.js";
 
 /**
  * Milestone 7 phase 5: generates the live draft-progress browser page - the
@@ -163,6 +163,10 @@ export function generateDraftProgressHtml(data: DraftProgressData): string {
       </ul>
     </section>
   </div>
+
+  <script>
+    ${CARD_PREVIEW_JS}
+  </script>
 </body>
 </html>
 `;

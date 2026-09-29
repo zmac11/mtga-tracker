@@ -1,5 +1,5 @@
 import { groupByManaCurve, type CardCurveInfo, type CurveBucket } from "./domain/manaCurve.js";
-import { CARD_PREVIEW_CSS, cardPreviewInnerHtml, colorDotsHtml, escapeHtml } from "./htmlCardHelpers.js";
+import { CARD_PREVIEW_CSS, CARD_PREVIEW_JS, cardPreviewInnerHtml, colorDotsHtml, escapeHtml } from "./htmlCardHelpers.js";
 
 /**
  * Milestone 7 phase 4: generates the deck-viewer browser page for one event
@@ -511,6 +511,7 @@ export function generateDeckViewerHtml(data: DeckViewerData): string {
   }
 
   <script>
+    ${CARD_PREVIEW_JS}
     function showView(name) {
       document.querySelectorAll('.view').forEach(function (el) { el.classList.toggle('active', el.dataset.view === name); });
       document.querySelectorAll('.tab-btn').forEach(function (el) { el.classList.toggle('active', el.dataset.view === name); });
@@ -549,7 +550,15 @@ export function generateDeckViewerHtml(data: DeckViewerData): string {
           if (active === card) return;
           if (active) active.classList.remove('is-hovered');
           active = card;
-          if (active) active.classList.add('is-hovered');
+          if (active) {
+            active.classList.add('is-hovered');
+            // Milestone 16: the plain mouseover/focusin delegation in
+            // CARD_PREVIEW_JS can't catch this trigger - visibility here is
+            // driven by the JS-toggled .is-hovered class above, not a native
+            // :hover match - so call it directly, right after the class that
+            // actually makes the preview visible.
+            positionPreview(active);
+          }
         }
         col.addEventListener('mousemove', function (e) {
           if (e.target && e.target.closest && e.target.closest('.preview')) return;

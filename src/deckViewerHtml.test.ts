@@ -125,6 +125,19 @@ function run() {
   assert.ok(html.includes("getBoundingClientRect"));
   assert.ok(!html.includes(".visual-card:hover"));
 
+  // Milestone 16: a .preview panel near the bottom/right edge of the window
+  // used to render partly off-screen (left: 100%; top: 0 with no collision
+  // check). CARD_PREVIEW_JS's positionPreview/flip classes fix that for
+  // every trigger on the page - the Deck list/Curve/Draft tabs' plain rows
+  // (mouseover/focusin-driven) and the Visual tab's cards (called directly
+  // from setActive, since visibility there is the JS .is-hovered class, not
+  // native :hover - see that function's own updated comment).
+  assert.ok(html.includes("function positionPreview(trigger)"));
+  assert.ok(html.includes("function initCardPreviewPositioning()"));
+  assert.ok(html.includes(".preview.flip-up"));
+  assert.ok(html.includes(".preview.flip-left"));
+  assert.ok(html.includes("positionPreview(active)")); // called from setActive, not just delegation
+
   // A custom card-image width (from the Settings window's "Card size" choice) is baked in as the CSS variable instead of the default.
   const wideCards = generateDeckViewerHtml({ ...data, cardImageWidthPx: 210 });
   assert.ok(wideCards.includes("--card-img-width: 210px"));

@@ -19,6 +19,15 @@
  * preview, and the Visual tab's own always-visible thumbnail badge in
  * deckViewerHtml.ts) - one definition here, reused everywhere, instead of
  * three near-identical ad hoc badges drifting apart.
+ *
+ * Milestone 16 (2026-09-29): `.preview` always opened below-and-right of its
+ * trigger by plain CSS (`left: 100%; top: 0`) - fine near the top of the
+ * page, but a trigger near the bottom or right edge of the window pushed the
+ * panel partly off-screen, which read as a flicker while scrolling/hovering
+ * down a list (see CARD_PREVIEW_JS below). `CARD_PREVIEW_JS`, like
+ * `CARD_PREVIEW_CSS`, is one shared string both deckViewerHtml.ts and
+ * draftProgressHtml.ts interpolate into their own inline `<script>` - one
+ * implementation of "keep the preview on screen", not two.
  */
 
 export interface HtmlCard {
@@ -82,11 +91,68 @@ export const CARD_PREVIEW_CSS = `
   .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
   .dot-W { background: #f8f6d8; } .dot-U { background: #4fa8e0; } .dot-B { background: #6b6b76; }
   .dot-R { background: #e05a4f; } .dot-G { background: #4fae6a; } .dot-C { background: #55586b; }
-  .preview { display: none; position: absolute; left: 100%; top: 0; z-index: 10; margin-left: 12px; background: #1c1d24; border: 1px solid #3a3c48; border-radius: 8px; padding: 8px; width: 260px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
+  .preview { display: none; position: absolute; left: 100%; top: 0; z-index: 10; margin-left: 12px; background: #1c1d24; border: 1px solid #3a3c48; border-radius: 8px; padding: 8px; width: 260px; max-height: calc(100vh - 24px); overflow-y: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
+  /* Milestone 16: collision-aware flip classes - see CARD_PREVIEW_JS. .flip-up
+     opens the panel upward (its bottom edge anchored to the trigger's top)
+     instead of downward, when there isn't room below. .flip-left opens it to
+     the left of the trigger instead of the right, when there isn't room on
+     the right. Either, both, or neither can be active at once. */
+  .preview.flip-up { top: auto; bottom: 0; }
+  .preview.flip-left { left: auto; right: 100%; margin-left: 0; margin-right: 12px; }
   .preview img { width: 100%; border-radius: 6px; display: block; }
   .preview-img-wrap { position: relative; }
   .preview-text { position: relative; font-size: 0.85rem; line-height: 1.4; }
   /* Milestone 15: shared "xN" quantity badge - see this file's header comment for every place it's reused (a hover preview's art here, plus the Visual tab's always-visible thumbnail badge in deckViewerHtml.ts, which pulls in this stylesheet). Positioned in the upper-right corner of whatever it's placed in, just below where a real card's mana-cost symbols print - the one spot that's never covered by a fanned/overlapping stack's next card (see deckViewerHtml.ts's Milestone 15 comment for why that mattered). */
   .qty-badge { position: absolute; top: 15%; right: 6px; background: rgba(0,0,0,0.78); color: #fff; font-size: 0.7rem; font-weight: 600; padding: 1px 5px; border-radius: 4px; z-index: 2; line-height: 1.3; }
   code { background: #22232c; padding: 1px 5px; border-radius: 4px; }
+`;
+
+/**
+ * Milestone 16: keeps every `.preview` panel fully on screen, no matter
+ * where its trigger (a `.card-row`, `.pick-row`, or the Visual tab's
+ * `.visual-card`) sits on the page. `.preview` opens below-and-right of its
+ * trigger by default (plain CSS) - this measures the real trigger and panel
+ * geometry right as the panel is about to become visible and flips it to
+ * whichever side actually has room, the same "collision-aware" approach a
+ * tooltip library like Floating UI uses, done here in plain JS since this
+ * project doesn't pull in a library for one positioning check. \`trigger\` is
+ * whatever element owns the \`.preview\` (its CSS positioning context) -
+ * \`positionPreview\` itself doesn't care which kind it is.
+ *
+ * \`getBoundingClientRect()\` on the still-hidden \`.preview\` returns an empty
+ * rect until it's actually visible, so this only works called at a point
+ * where the panel's \`display: block\` has already taken effect - a plain
+ * \`:hover\`/\`:focus\`-driven trigger satisfies that by the time a \`mouseover\`/
+ * \`focusin\` event reaches this listener (the browser matches \`:hover\`
+ * before dispatching the event), which is what \`initCardPreviewPositioning\`
+ * below relies on; a JS-driven trigger (the Visual tab's \`.is-hovered\`,
+ * added by initVisualHover in deckViewerHtml.ts) instead calls
+ * \`positionPreview\` itself, right after adding that class.
+ */
+export const CARD_PREVIEW_JS = `
+  function positionPreview(trigger) {
+    var preview = trigger.querySelector('.preview');
+    if (!preview) return;
+    preview.classList.remove('flip-up', 'flip-left');
+    var margin = 8;
+    var triggerRect = trigger.getBoundingClientRect();
+    var previewRect = preview.getBoundingClientRect();
+    if (triggerRect.top + previewRect.height + margin > window.innerHeight) {
+      preview.classList.add('flip-up');
+    }
+    if (triggerRect.right + previewRect.width + margin > window.innerWidth) {
+      preview.classList.add('flip-left');
+    }
+  }
+  function initCardPreviewPositioning() {
+    document.addEventListener('mouseover', function (e) {
+      var trigger = e.target.closest('.card-row, .pick-row');
+      if (trigger) positionPreview(trigger);
+    });
+    document.addEventListener('focusin', function (e) {
+      var trigger = e.target.closest('.card-row, .pick-row, .visual-card');
+      if (trigger) positionPreview(trigger);
+    });
+  }
+  initCardPreviewPositioning();
 `;

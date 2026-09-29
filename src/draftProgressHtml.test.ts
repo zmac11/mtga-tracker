@@ -34,6 +34,11 @@ function run() {
   assert.ok(html.includes("2 picked so far"));
   assert.ok(html.includes("UR"));
   assert.ok(html.includes(`meta http-equiv="refresh" content="3"`)); // auto-refresh, no server involved
+  // Milestone 16: this page's card-row previews had the same off-screen-panel
+  // bug as the deck viewer's (see deckViewerHtml.test.ts) - it had no <script>
+  // at all before this fix, so CARD_PREVIEW_JS is now the whole of it.
+  assert.ok(html.includes("function positionPreview(trigger)"));
+  assert.ok(html.includes("function initCardPreviewPositioning()"));
 
   // Current pack: both cards present, with their hover-preview fallbacks (image vs oracle text).
   assert.ok(html.includes("Riverglass Sprite"));
