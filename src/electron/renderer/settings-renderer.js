@@ -11,6 +11,10 @@ const cardSizeOptionsEl = document.getElementById("card-size-options");
 const opacitySlider = document.getElementById("opacity-slider");
 const opacityValueEl = document.getElementById("opacity-value");
 const statusEl = document.getElementById("status");
+// Milestone 15: the "Updates" section.
+const autoUpdateCheckbox = document.getElementById("auto-update-checkbox");
+const checkUpdatesBtn = document.getElementById("check-updates-btn");
+const updateStatusEl = document.getElementById("update-status");
 
 function showStatus(text) {
   statusEl.textContent = text;
@@ -86,11 +90,51 @@ opacitySlider.addEventListener("change", async () => {
   }
 });
 
+// Milestone 15: renders whatever the last update check (from this run or an
+// earlier one) found - see main.ts's UpdateCheckStatus/checkForUpdates.
+// "Checking..." while a check is in flight overrides whatever's here.
+function renderUpdateResult(result) {
+  if (!result) {
+    updateStatusEl.textContent = "Not checked yet.";
+    return;
+  }
+  if (!result.ok) {
+    updateStatusEl.textContent = result.error ? `Check failed: ${result.error}` : "Check failed.";
+    return;
+  }
+  if (result.updateAvailable && result.latestVersion) {
+    updateStatusEl.textContent = `Update available: ${result.latestVersion} (you have v${result.currentVersion})`;
+  } else {
+    updateStatusEl.textContent = `Up to date (v${result.currentVersion}).`;
+  }
+}
+
+autoUpdateCheckbox.addEventListener("change", async () => {
+  const result = await window.settingsApi.setAutoCheckForUpdates(autoUpdateCheckbox.checked);
+  if (!result || !result.ok) {
+    showStatus((result && result.reason) || "Could not change the update-check setting.");
+    autoUpdateCheckbox.checked = !autoUpdateCheckbox.checked; // revert the checkbox on failure
+  }
+});
+
+checkUpdatesBtn.addEventListener("click", async () => {
+  checkUpdatesBtn.disabled = true;
+  updateStatusEl.textContent = "Checking...";
+  try {
+    const result = await window.settingsApi.checkForUpdatesNow();
+    renderUpdateResult(result);
+  } finally {
+    checkUpdatesBtn.disabled = false;
+  }
+});
+
 async function init() {
   const settings = await window.settingsApi.getSettings();
   renderSizeOptions(settings.presets, settings.sizePreset);
   renderCardSizeOptions(settings.cardSizePresets, settings.cardSizePreset);
   setOpacitySlider(settings.opacity);
+  autoUpdateCheckbox.checked = settings.autoCheckForUpdates !== false;
+  updateStatusEl.textContent = settings.appVersion ? `Current version: v${settings.appVersion}` : "";
 }
 
 init();

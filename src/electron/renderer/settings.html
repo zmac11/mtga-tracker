@@ -29,6 +29,19 @@
       </div>
     </section>
 
+    <section>
+      <h2>Updates</h2>
+      <p class="hint">Checks the project's GitHub releases - never installs anything automatically, just tells you when a newer version is out.</p>
+      <label class="checkbox-row">
+        <input type="checkbox" id="auto-update-checkbox" />
+        <span>Automatically check for updates</span>
+      </label>
+      <div class="update-row">
+        <button id="check-updates-btn" type="button">Check Now</button>
+        <span id="update-status" class="hint">Loading...</span>
+      </div>
+    </section>
+
     <p id="status" class="status"></p>
 
     <script src="settings-renderer.js"></script>

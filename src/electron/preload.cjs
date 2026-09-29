@@ -37,4 +37,7 @@ contextBridge.exposeInMainWorld("settingsApi", {
   setOpacity: (opacity) => ipcRenderer.invoke("set-opacity", opacity),
   // Milestone 13: deck viewer "Visual" tab card-thumbnail size.
   setCardSizePreset: (presetKey) => ipcRenderer.invoke("set-card-size-preset", presetKey),
+  // Milestone 15: the "Updates" section - toggling automatic checks, and an explicit "Check Now" button.
+  setAutoCheckForUpdates: (enabled) => ipcRenderer.invoke("set-auto-check-updates", enabled),
+  checkForUpdatesNow: () => ipcRenderer.invoke("check-for-updates-now"),
 });

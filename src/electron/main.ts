@@ -2,6 +2,7 @@ import { app, BrowserWindow, globalShortcut, ipcMain, Menu, nativeImage, Notific
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { exec } from "node:child_process";
 import { CapturePipeline } from "../pipeline.js";
 import { LiveStateTracker } from "../domain/liveState.js";
 import { TypedEventStore } from "../db/sqliteStore.js";
@@ -63,6 +64,18 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
  * appear because of a hide from a previous session the user forgot about.
  * See toggleOverlayHidden() below.
  */
+
+/**
+ * Milestone 15: "check & notify" version checking against the repo's public
+ * GitHub Releases - see checkForUpdates() below for the full rationale
+ * (short version: no code-signing/notarization setup exists for this
+ * project yet, so a real silent auto-updater isn't safe to ship - this only
+ * ever tells the user a newer release exists and links to it).
+ */
+const GITHUB_RELEASES_API = "https://api.github.com/repos/zmac11/mtga-tracker/releases/latest";
+const GITHUB_RELEASES_PAGE = "https://github.com/zmac11/mtga-tracker/releases/latest";
+const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // every 6 hours while running
+const ARENA_POLL_INTERVAL_MS = 20 * 1000; // best-effort "did Arena just launch" poll - see checkArenaProcess()
 
 function parseArgs(argv: string[]) {
   const args = { logPath: undefined as string | undefined, fromStart: false };
@@ -146,6 +159,7 @@ interface OverlaySettings {
   sizePreset: string; // a key of SIZE_PRESETS
   opacity: number; // MIN_OPACITY..MAX_OPACITY
   cardSizePreset: string; // a key of CARD_SIZE_PRESETS - milestone 13
+  autoCheckForUpdates: boolean; // milestone 15 - defaults to true; see the Settings window's "Updates" section
 }
 
 function overlaySettingsPath(): string {
@@ -163,10 +177,15 @@ function loadOverlaySettings(): OverlaySettings {
       typeof parsed.opacity === "number" && parsed.opacity >= MIN_OPACITY && parsed.opacity <= MAX_OPACITY ? parsed.opacity : DEFAULT_OPACITY;
     const cardSizePreset =
       typeof parsed.cardSizePreset === "string" && parsed.cardSizePreset in CARD_SIZE_PRESETS ? parsed.cardSizePreset : DEFAULT_CARD_SIZE_PRESET;
-    return { sizePreset, opacity, cardSizePreset };
+    // Milestone 15: tolerant-default like every other field here - an
+    // older settings file from before this field existed (or a future one
+    // this build doesn't understand) just falls back to "on" rather than
+    // failing the whole parse, same convention as the rest of this loader.
+    const autoCheckForUpdates = typeof parsed.autoCheckForUpdates === "boolean" ? parsed.autoCheckForUpdates : true;
+    return { sizePreset, opacity, cardSizePreset, autoCheckForUpdates };
   } catch {
     // No settings saved yet, or the file's unreadable/corrupt - fall back to the original look.
-    return { sizePreset: DEFAULT_SIZE_PRESET, opacity: DEFAULT_OPACITY, cardSizePreset: DEFAULT_CARD_SIZE_PRESET };
+    return { sizePreset: DEFAULT_SIZE_PRESET, opacity: DEFAULT_OPACITY, cardSizePreset: DEFAULT_CARD_SIZE_PRESET, autoCheckForUpdates: true };
   }
 }
 
@@ -236,13 +255,214 @@ let overlayHidden = false; // milestone 11: whole-window show/hide, independent 
 let watchingStatus = "Starting...";
 let refreshingCards = false;
 let cardRefreshStatus: CardRefreshStatus | null = null;
-let overlaySettings: OverlaySettings = { sizePreset: DEFAULT_SIZE_PRESET, opacity: DEFAULT_OPACITY, cardSizePreset: DEFAULT_CARD_SIZE_PRESET };
+let overlaySettings: OverlaySettings = { sizePreset: DEFAULT_SIZE_PRESET, opacity: DEFAULT_OPACITY, cardSizePreset: DEFAULT_CARD_SIZE_PRESET, autoCheckForUpdates: true };
 // Set once the pipeline (and therefore its dataDir) exists, inside
 // app.whenReady() below - kept as a module-level slot (rather than a
 // closure captured directly by the tray's click handlers) so
 // rebuildTrayMenu() can stay a plain top-level function like the rest of
 // this file's UI wiring.
 let runCardRefresh: ((skipEnrich: boolean) => void) | null = null;
+
+/**
+ * Milestone 15: remembers the outcome of the last version check across
+ * relaunches - same "small JSON file under userData" pattern as
+ * CardRefreshStatus above - so the tray can show "Update available" (or
+ * just the current version) immediately on startup, before the first check
+ * of this run has had a chance to run.
+ */
+interface UpdateCheckStatus {
+  lastCheckedAt: string; // ISO timestamp
+  latestVersion: string | null; // e.g. "0.2.0" - the tag of the repo's latest GitHub Release, or null if the last check failed/found none
+  updateAvailable: boolean;
+}
+
+function updateCheckStatusPath(): string {
+  const dir = app.getPath("userData");
+  mkdirSync(dir, { recursive: true });
+  return join(dir, "update-check-status.json");
+}
+
+function loadUpdateCheckStatus(): UpdateCheckStatus | null {
+  try {
+    const raw = readFileSync(updateCheckStatusPath(), "utf8");
+    const parsed = JSON.parse(raw);
+    if (typeof parsed.lastCheckedAt === "string" && typeof parsed.updateAvailable === "boolean") {
+      const latestVersion = typeof parsed.latestVersion === "string" ? parsed.latestVersion : null;
+      return { lastCheckedAt: parsed.lastCheckedAt, latestVersion, updateAvailable: parsed.updateAvailable };
+    }
+  } catch {
+    // No check recorded yet, or the file's unreadable/corrupt.
+  }
+  return null;
+}
+
+function saveUpdateCheckStatus(status: UpdateCheckStatus): void {
+  try {
+    writeFileSync(updateCheckStatusPath(), JSON.stringify(status), "utf8");
+  } catch {
+    // Best-effort - losing the remembered status isn't worth crashing over.
+  }
+}
+
+let updateCheckStatus: UpdateCheckStatus | null = null;
+let checkingForUpdates = false;
+// Milestone 15: edge-triggered state for checkArenaProcess() below - only
+// fires a check on the not-running -> running transition, not on every poll.
+let arenaWasRunning = false;
+
+/**
+ * Milestone 15: plain major.minor.patch comparison (ignoring any
+ * pre-release/build suffix like "-beta") - good enough for "is the tag on
+ * GitHub newer than the version I'm running", without pulling in a real
+ * semver dependency for one comparison. A missing/non-numeric segment on
+ * either side is treated as 0, so "v0.2" compares fine against "0.2.0".
+ */
+function isNewerVersion(candidate: string, current: string): boolean {
+  const parse = (v: string) =>
+    v
+      .replace(/^v/i, "")
+      .split(".")
+      .map((n) => parseInt(n, 10) || 0);
+  const [c1, c2, c3] = parse(candidate);
+  const [r1, r2, r3] = parse(current);
+  if (c1 !== r1) return c1 > r1;
+  if (c2 !== r2) return c2 > r2;
+  return c3 > r3;
+}
+
+function notifyUpdateAvailable(latestVersion: string): void {
+  try {
+    if (!Notification.isSupported()) return;
+    const n = new Notification({
+      title: "MTGA Tracker update available",
+      body: `${latestVersion} is out (you have v${app.getVersion()}) - click to view it on GitHub.`,
+    });
+    n.on("click", () => {
+      shell.openExternal(GITHUB_RELEASES_PAGE);
+    });
+    n.show();
+  } catch {
+    // The tray's "Update available" item (see rebuildTrayMenu) covers this either way.
+  }
+}
+
+/**
+ * Milestone 15: "check & notify", not a real auto-updater. This project has
+ * no code-signing certificate or (on macOS) notarization set up, so an
+ * unsigned auto-updater silently downloading and replacing its own binary
+ * isn't something that can ship safely yet - Gatekeeper/SmartScreen exist
+ * specifically to distrust that, and working around it would either fail
+ * outright or train users to click through a real security warning, which
+ * is worse than not having the feature. So this only ever compares
+ * app.getVersion() (package.json's "version", baked in at build time)
+ * against the tag of the repo's latest public GitHub Release
+ * (GITHUB_RELEASES_API - no auth needed for a public repo's releases) and,
+ * if newer, shows a native notification plus a tray item linking to the
+ * releases page - actually updating is still a manual `git pull`/re-download
+ * by the user. Fails silently on any network error (offline, rate limited,
+ * or - very likely early on - no GitHub Release has been published yet at
+ * all) since a background version check is a nice-to-have, never worth an
+ * error dialog popping up mid-match. `showUpToDateNotification` is true only
+ * for an explicit "Check for Updates Now" click (tray item or Settings
+ * button) - the silent startup/periodic/Arena-launch triggers never notify
+ * when there's nothing new, only when there is.
+ */
+async function checkForUpdates(
+  showUpToDateNotification: boolean,
+): Promise<{ ok: boolean; currentVersion: string; latestVersion: string | null; updateAvailable: boolean; error?: string }> {
+  const currentVersion = app.getVersion();
+  if (checkingForUpdates) {
+    return {
+      ok: false,
+      currentVersion,
+      latestVersion: updateCheckStatus?.latestVersion ?? null,
+      updateAvailable: updateCheckStatus?.updateAvailable ?? false,
+      error: "A check is already in progress.",
+    };
+  }
+  checkingForUpdates = true;
+  rebuildTrayMenu();
+  try {
+    const res = await fetch(GITHUB_RELEASES_API, { headers: { Accept: "application/vnd.github+json" } });
+    if (!res.ok) {
+      throw new Error(res.status === 404 ? "No GitHub Release has been published for this repo yet." : `GitHub returned HTTP ${res.status}.`);
+    }
+    const json = (await res.json()) as { tag_name?: unknown };
+    const tag = typeof json.tag_name === "string" ? json.tag_name : null;
+    if (!tag) throw new Error("GitHub's response had no tag_name.");
+    const updateAvailable = isNewerVersion(tag, currentVersion);
+    updateCheckStatus = { lastCheckedAt: new Date().toISOString(), latestVersion: tag, updateAvailable };
+    saveUpdateCheckStatus(updateCheckStatus);
+    if (updateAvailable) {
+      notifyUpdateAvailable(tag);
+    } else if (showUpToDateNotification) {
+      try {
+        if (Notification.isSupported()) new Notification({ title: "MTGA Tracker", body: `You're up to date (v${currentVersion}).` }).show();
+      } catch {
+        // Notifications are a nice-to-have.
+      }
+    }
+    return { ok: true, currentVersion, latestVersion: tag, updateAvailable };
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    console.error("Update check failed:", reason);
+    return {
+      ok: false,
+      currentVersion,
+      latestVersion: updateCheckStatus?.latestVersion ?? null,
+      updateAvailable: updateCheckStatus?.updateAvailable ?? false,
+      error: reason,
+    };
+  } finally {
+    checkingForUpdates = false;
+    rebuildTrayMenu();
+  }
+}
+
+/**
+ * Milestone 15: best-effort "MTG Arena just launched" detection, for the
+ * user's "checks for updates ... when MTG Arena is launched" ask - polls the
+ * OS process list every ARENA_POLL_INTERVAL_MS for a process matching
+ * Arena's usual executable name and fires exactly one update check on the
+ * not-running -> running transition (never on every poll, and never again
+ * while it's still running). The process name ("MTGA" on macOS/Linux,
+ * "MTGA.exe" on Windows) is Arena's normal executable name, not something
+ * this project has verified against a real running install on every
+ * platform - worth double-checking in Activity Monitor/Task Manager while
+ * Arena is open if this never seems to fire for you. Failing to detect
+ * Arena at all is silently harmless either way - the startup and periodic
+ * checks above still run regardless.
+ */
+function checkArenaProcess(): void {
+  if (!overlaySettings.autoCheckForUpdates) return;
+  const cmd = process.platform === "win32" ? `tasklist /FI "IMAGENAME eq MTGA.exe"` : `pgrep -f -i "MTGA"`;
+  exec(cmd, { timeout: 5000 }, (err, stdout) => {
+    const isRunning = process.platform === "win32" ? /MTGA\.exe/i.test(stdout) : !err && stdout.trim().length > 0;
+    if (isRunning && !arenaWasRunning) {
+      checkForUpdates(false).catch(() => {});
+    }
+    arenaWasRunning = isRunning;
+  });
+}
+
+/**
+ * Milestone 15: the simplest "feedback reaches my email" mechanism that
+ * needs no backend, no new third-party account/service, and no secrets
+ * shipped inside the app - opens the user's own default mail client with a
+ * pre-filled mailto: link (subject plus app version/platform in the body,
+ * so a report always carries the basics without the user having to
+ * remember to add them). Nothing is transmitted by this app itself; the
+ * user still has to hit send in their own mail app, same as clicking any
+ * other mailto: link on a website.
+ */
+function sendFeedback(): void {
+  const subject = `MTGA Tracker feedback (v${app.getVersion()})`;
+  const body = `\n\n---\nApp version: ${app.getVersion()}\nPlatform: ${process.platform} (${process.arch})`;
+  const mailto = `mailto:zmaceska@seznam.cz?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  shell.openExternal(mailto).catch((err) => {
+    console.error("Could not open the default mail client for feedback:", err);
+  });
+}
 
 function createWindow(settings: OverlaySettings): BrowserWindow {
   const preset = SIZE_PRESETS[settings.sizePreset] ?? SIZE_PRESETS[DEFAULT_SIZE_PRESET];
@@ -363,7 +583,7 @@ function openSettingsWindow(): void {
   }
   settingsWindow = new BrowserWindow({
     width: 340,
-    height: 420,
+    height: 520, // milestone 15: grew to fit the new "Updates" section below the original three
     resizable: false,
     minimizable: false,
     maximizable: false,
@@ -430,6 +650,27 @@ function rebuildTrayMenu(): void {
       enabled: !refreshingCards,
       click: () => runCardRefresh?.(true),
     },
+    { type: "separator" },
+    { label: `MTGA Tracker v${app.getVersion()}`, enabled: false },
+    ...(updateCheckStatus?.updateAvailable && updateCheckStatus.latestVersion
+      ? [
+          {
+            label: `Update available: ${updateCheckStatus.latestVersion} (click to view on GitHub)`,
+            click: () => {
+              shell.openExternal(GITHUB_RELEASES_PAGE);
+            },
+          },
+        ]
+      : [
+          {
+            label: checkingForUpdates ? "Checking for updates..." : "Check for Updates Now",
+            enabled: !checkingForUpdates,
+            click: () => {
+              checkForUpdates(true).catch(() => {});
+            },
+          },
+        ]),
+    { label: "Send Feedback...", click: sendFeedback },
     { type: "separator" },
     { label: "Quit MTGA Tracker", accelerator: "CommandOrControl+Shift+Q", click: () => app.quit() },
   ]);
@@ -541,6 +782,9 @@ app.whenReady().then(() => {
     presets: Object.entries(SIZE_PRESETS).map(([key, preset]) => ({ key, label: preset.label })),
     cardSizePreset: overlaySettings.cardSizePreset,
     cardSizePresets: Object.entries(CARD_SIZE_PRESETS).map(([key, preset]) => ({ key, label: preset.label })),
+    // Milestone 15: the Settings window's "Updates" section.
+    autoCheckForUpdates: overlaySettings.autoCheckForUpdates,
+    appVersion: app.getVersion(),
   }));
 
   // Milestone 13: persists the deck viewer's "Visual" tab card-thumbnail
@@ -572,6 +816,21 @@ app.whenReady().then(() => {
     applyOverlaySettings({ ...overlaySettings, opacity: clamped });
     return { ok: true, sizePreset: overlaySettings.sizePreset, opacity: overlaySettings.opacity };
   });
+
+  // Milestone 15: the Settings window's "Updates" section - a plain on/off
+  // toggle (persisted like every other overlay setting) plus an explicit
+  // "Check Now" button. Nothing here ever installs anything - see
+  // checkForUpdates's comment for why.
+  ipcMain.handle("set-auto-check-updates", (_event, enabled: unknown) => {
+    if (typeof enabled !== "boolean") {
+      return { ok: false, reason: "Invalid value." };
+    }
+    overlaySettings = { ...overlaySettings, autoCheckForUpdates: enabled };
+    saveOverlaySettings(overlaySettings);
+    return { ok: true, autoCheckForUpdates: overlaySettings.autoCheckForUpdates };
+  });
+
+  ipcMain.handle("check-for-updates-now", () => checkForUpdates(true));
 
   // Milestone 7 phase 4: "click the current event to view its deck" - opens
   // a generated static HTML page (data/deck-viewer/<eventId>.html) in the
@@ -685,6 +944,23 @@ app.whenReady().then(() => {
     console.error("Make sure Options > Account > Detailed Logs (Plugin Support) is on, then relaunch Arena once.");
   }
   rebuildTrayMenu();
+
+  // Milestone 15: version-check triggers - once shortly after startup (so it
+  // never competes with the "find Player.log"/tray setup above), then on a
+  // fixed interval, then best-effort whenever Arena's own process looks like
+  // it just launched. All three are silent (no "up to date" notification,
+  // only "update available") and all three respect the Settings window's
+  // "Automatically check for updates" toggle - see checkForUpdates's comment
+  // for the full rationale (short version: never auto-installs, only ever
+  // notifies).
+  updateCheckStatus = loadUpdateCheckStatus();
+  setTimeout(() => {
+    if (overlaySettings.autoCheckForUpdates) checkForUpdates(false).catch(() => {});
+  }, 8000);
+  setInterval(() => {
+    if (overlaySettings.autoCheckForUpdates) checkForUpdates(false).catch(() => {});
+  }, UPDATE_CHECK_INTERVAL_MS);
+  setInterval(checkArenaProcess, ARENA_POLL_INTERVAL_MS);
 
   globalShortcut.register("CommandOrControl+Shift+O", toggleInteractive);
   // Milestone 11: show/hide the whole overlay window, independent of the unlock/drag toggle above.
