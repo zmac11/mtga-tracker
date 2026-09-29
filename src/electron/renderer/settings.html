@@ -42,6 +42,36 @@
       </div>
     </section>
 
+    <section>
+      <h2>Locations</h2>
+      <p class="hint">
+        Only needed if auto-detection guessed wrong - more likely on
+        Windows, where these default locations haven't been confirmed
+        against every install. Leave on auto-detect unless the tray tells
+        you it couldn't find something.
+      </p>
+
+      <div class="location-row">
+        <div class="location-label">Player.log</div>
+        <div id="log-path-status" class="location-status">Loading...</div>
+        <div class="location-buttons">
+          <button id="choose-log-path-btn" type="button">Browse...</button>
+          <button id="reset-log-path-btn" type="button">Auto-detect</button>
+        </div>
+        <p class="hint">Changing this restarts the app.</p>
+      </div>
+
+      <div class="location-row">
+        <div class="location-label">Card database folder</div>
+        <div id="card-db-path-status" class="location-status">Loading...</div>
+        <div class="location-buttons">
+          <button id="choose-card-db-path-btn" type="button">Browse...</button>
+          <button id="reset-card-db-path-btn" type="button">Auto-detect</button>
+        </div>
+        <p class="hint">Pick the folder containing Arena's Raw_CardDatabase_*.mtga file (its Downloads/Raw folder). Takes effect on the next card refresh.</p>
+      </div>
+    </section>
+
     <p id="status" class="status"></p>
 
     <script src="settings-renderer.js"></script>

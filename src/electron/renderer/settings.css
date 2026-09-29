@@ -130,3 +130,53 @@ h2 {
 #update-status {
   flex: 1;
 }
+
+/* Milestone 18: the "Locations" section - manual Player.log/card-database
+   path overrides, styled to reuse the same button look the Updates
+   section's "Check Now" already established above. */
+.location-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 6px;
+}
+
+.location-label {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.location-status {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.7);
+  word-break: break-all;
+}
+
+.location-status.not-found {
+  color: #e5a45c;
+}
+
+.location-buttons {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.location-buttons button {
+  background: #2c2d38;
+  color: #fff;
+  border: 1px solid #3a3c48;
+  border-radius: 5px;
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.location-buttons button:hover {
+  background: #34364280;
+}
+
+.location-buttons button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}

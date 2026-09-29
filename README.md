@@ -68,6 +68,27 @@ and turn on **Detailed Logs (Plugin Support)**, then relaunch Arena once.
 Without that, Arena won't write the log file this app reads, and the tray
 menu will tell you it couldn't find `Player.log`.
 
+### If it can't find Player.log or your card database
+
+The app looks in the default location for your OS/install method
+automatically - this is well-tested on macOS + Steam (where it was built),
+but the equivalent Windows locations are best-effort guesses that haven't
+been confirmed against every real install (a different drive, a
+non-Steam install, etc. could all land somewhere else). If the tray says
+it couldn't find `Player.log`, or "Refresh Card Database" fails to find
+Arena's database, open **Overlay Settings...** from the tray and use the
+new **Locations** section to browse to the right file/folder yourself:
+
+- **Player.log** - the exact log file MTG Arena writes (see the paths in
+  "Privacy" below for where it normally lives per OS). Setting this
+  restarts the app.
+- **Card database folder** - the folder inside your Arena install
+  containing a file named `Raw_CardDatabase_<something>.mtga` (usually
+  something like `.../MTGA/MTGA_Data/Downloads/Raw/`). Takes effect the
+  next time you click "Refresh Card Database" - no restart needed.
+
+Either box can be reset back to "Auto-detect" the same way.
+
 ## Using it
 
 Launching the app (`npm run overlay`, or the packaged app) adds an icon to
@@ -82,7 +103,10 @@ the tray icon for:
 - **Hide Overlay** (`Cmd/Ctrl+Shift+H`) - hide/show the whole overlay
   window.
 - **Overlay Settings...** - overlay size, transparency, deck-viewer card
-  thumbnail size, and automatic update checks (see below).
+  thumbnail size, automatic update checks (see below), and, under
+  "Locations," manual overrides for where the app looks for `Player.log`
+  and Arena's card database if it can't find either automatically (see
+  "If it can't find Player.log or your card database" below).
 - **Refresh Card Database** - pulls current card names/images/text so the
   deck viewer and draft-progress pages can show real art instead of just
   card IDs. Worth doing once after installing, and again after any Arena

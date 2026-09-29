@@ -1,4 +1,4 @@
-import { app, BrowserWindow, globalShortcut, ipcMain, Menu, nativeImage, Notification, screen, shell, Tray } from "electron";
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, screen, shell, Tray } from "electron";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,6 +8,7 @@ import { LiveStateTracker } from "../domain/liveState.js";
 import { TypedEventStore } from "../db/sqliteStore.js";
 import { CardStore } from "../cards/cardStore.js";
 import { locateCardDatabase } from "../cards/cardDbLocator.js";
+import { locateLogFile } from "../log/logLocator.js";
 import { extractArenaCards } from "../cards/extractArenaCards.js";
 import { enrichCards } from "../cards/scryfallEnrich.js";
 import { buildDeckViewerData } from "../deckViewerLoader.js";
@@ -160,6 +161,18 @@ interface OverlaySettings {
   opacity: number; // MIN_OPACITY..MAX_OPACITY
   cardSizePreset: string; // a key of CARD_SIZE_PRESETS - milestone 13
   autoCheckForUpdates: boolean; // milestone 15 - defaults to true; see the Settings window's "Updates" section
+  // Milestone 18: manual overrides for a player whose Player.log/card
+  // database isn't where auto-detection guesses (logLocator.ts/
+  // cardDbLocator.ts's Windows paths are explicitly documented as
+  // unconfirmed guesses - a friend on Windows is likely the first real
+  // test of them). null means "keep auto-detecting" - the common case,
+  // and what every existing settings file implicitly has. Changing
+  // customLogPath requires a relaunch to take effect (the capture pipeline
+  // only resolves its path once, at startup - see main() below);
+  // customCardDbPath is re-read fresh on every "Refresh Card Database"
+  // click, so it needs no relaunch.
+  customLogPath: string | null;
+  customCardDbPath: string | null;
 }
 
 function overlaySettingsPath(): string {
@@ -182,10 +195,22 @@ function loadOverlaySettings(): OverlaySettings {
     // this build doesn't understand) just falls back to "on" rather than
     // failing the whole parse, same convention as the rest of this loader.
     const autoCheckForUpdates = typeof parsed.autoCheckForUpdates === "boolean" ? parsed.autoCheckForUpdates : true;
-    return { sizePreset, opacity, cardSizePreset, autoCheckForUpdates };
+    // Milestone 18: same tolerant-default convention as every field above -
+    // an older settings file simply doesn't have these keys, which is
+    // exactly "keep auto-detecting", not an error.
+    const customLogPath = typeof parsed.customLogPath === "string" && parsed.customLogPath.length > 0 ? parsed.customLogPath : null;
+    const customCardDbPath = typeof parsed.customCardDbPath === "string" && parsed.customCardDbPath.length > 0 ? parsed.customCardDbPath : null;
+    return { sizePreset, opacity, cardSizePreset, autoCheckForUpdates, customLogPath, customCardDbPath };
   } catch {
     // No settings saved yet, or the file's unreadable/corrupt - fall back to the original look.
-    return { sizePreset: DEFAULT_SIZE_PRESET, opacity: DEFAULT_OPACITY, cardSizePreset: DEFAULT_CARD_SIZE_PRESET, autoCheckForUpdates: true };
+    return {
+      sizePreset: DEFAULT_SIZE_PRESET,
+      opacity: DEFAULT_OPACITY,
+      cardSizePreset: DEFAULT_CARD_SIZE_PRESET,
+      autoCheckForUpdates: true,
+      customLogPath: null,
+      customCardDbPath: null,
+    };
   }
 }
 
@@ -255,7 +280,14 @@ let overlayHidden = false; // milestone 11: whole-window show/hide, independent 
 let watchingStatus = "Starting...";
 let refreshingCards = false;
 let cardRefreshStatus: CardRefreshStatus | null = null;
-let overlaySettings: OverlaySettings = { sizePreset: DEFAULT_SIZE_PRESET, opacity: DEFAULT_OPACITY, cardSizePreset: DEFAULT_CARD_SIZE_PRESET, autoCheckForUpdates: true };
+let overlaySettings: OverlaySettings = {
+  sizePreset: DEFAULT_SIZE_PRESET,
+  opacity: DEFAULT_OPACITY,
+  cardSizePreset: DEFAULT_CARD_SIZE_PRESET,
+  autoCheckForUpdates: true,
+  customLogPath: null,
+  customCardDbPath: null,
+};
 // Set once the pipeline (and therefore its dataDir) exists, inside
 // app.whenReady() below - kept as a module-level slot (rather than a
 // closure captured directly by the tray's click handlers) so
@@ -583,7 +615,7 @@ function openSettingsWindow(): void {
   }
   settingsWindow = new BrowserWindow({
     width: 340,
-    height: 520, // milestone 15: grew to fit the new "Updates" section below the original three
+    height: 660, // milestone 18: grew again to fit the new "Locations" section below Updates
     resizable: false,
     minimizable: false,
     maximizable: false,
@@ -696,7 +728,8 @@ app.whenReady().then(() => {
   mainWindow = createWindow(overlaySettings);
   tray = createTray();
 
-  const { logPath, fromStart } = parseArgs(process.argv.slice(2));
+  const { logPath: argvLogPath, fromStart } = parseArgs(process.argv.slice(2));
+  const logPath = argvLogPath ?? overlaySettings.customLogPath ?? undefined;
   const pipeline = new CapturePipeline({ logPath, fromStart });
   const liveState = new LiveStateTracker();
   // Rebuild win-rate/event-record history from previous runs before we ever
@@ -726,7 +759,7 @@ app.whenReady().then(() => {
 
     let store: CardStore | null = null;
     try {
-      const located = locateCardDatabase();
+      const located = locateCardDatabase(overlaySettings.customCardDbPath ?? undefined);
       if (!located.found || !located.path) {
         throw new Error("Could not find Arena's card database - make sure MTG Arena is installed and has been run at least once.");
       }
@@ -776,16 +809,100 @@ app.whenReady().then(() => {
   // window never hardcodes the preset list itself; it always renders
   // whatever get-overlay-settings hands back, so adding/renaming a preset
   // here is the only place that needs to change.
-  ipcMain.handle("get-overlay-settings", () => ({
-    sizePreset: overlaySettings.sizePreset,
-    opacity: overlaySettings.opacity,
-    presets: Object.entries(SIZE_PRESETS).map(([key, preset]) => ({ key, label: preset.label })),
-    cardSizePreset: overlaySettings.cardSizePreset,
-    cardSizePresets: Object.entries(CARD_SIZE_PRESETS).map(([key, preset]) => ({ key, label: preset.label })),
-    // Milestone 15: the Settings window's "Updates" section.
-    autoCheckForUpdates: overlaySettings.autoCheckForUpdates,
-    appVersion: app.getVersion(),
-  }));
+  ipcMain.handle("get-overlay-settings", () => {
+    // Milestone 18: re-resolved fresh on every call (a cheap directory
+    // scan for the card database, already-known for the log since the
+    // pipeline resolved it once at startup) rather than cached, so the
+    // Settings window always shows live status - e.g. if Arena's card
+    // database file got renamed by a client update since this app launched.
+    const cardDbStatus = locateCardDatabase(overlaySettings.customCardDbPath ?? undefined);
+    return {
+      sizePreset: overlaySettings.sizePreset,
+      opacity: overlaySettings.opacity,
+      presets: Object.entries(SIZE_PRESETS).map(([key, preset]) => ({ key, label: preset.label })),
+      cardSizePreset: overlaySettings.cardSizePreset,
+      cardSizePresets: Object.entries(CARD_SIZE_PRESETS).map(([key, preset]) => ({ key, label: preset.label })),
+      // Milestone 15: the Settings window's "Updates" section.
+      autoCheckForUpdates: overlaySettings.autoCheckForUpdates,
+      appVersion: app.getVersion(),
+      // Milestone 18: the "Locations" section - lets a player override
+      // auto-detection when it guesses wrong (expected to be more common on
+      // Windows, where these paths were never confirmed against a real
+      // machine - see logLocator.ts/cardDbLocator.ts).
+      logPath: {
+        custom: overlaySettings.customLogPath,
+        resolved: pipeline.located.path,
+        found: pipeline.located.found,
+      },
+      cardDbPath: {
+        custom: overlaySettings.customCardDbPath,
+        resolved: cardDbStatus.path,
+        found: cardDbStatus.found,
+      },
+    };
+  });
+
+  // Milestone 18: the capture pipeline only resolves Player.log's path once,
+  // at startup (see CapturePipeline's constructor) - there's no live
+  // "re-point the tailer" support, and adding one would mean touching the
+  // same rotation-sensitive tailer code the milestone 5 log-rotation fix
+  // depends on. A full app relaunch is simpler and safer: save the new
+  // path, tell the renderer a restart is coming (so it isn't left looking
+  // like nothing happened when the window vanishes), then relaunch on a
+  // short delay so that response actually reaches the renderer first.
+  function relaunchShortly(): void {
+    setTimeout(() => {
+      app.relaunch();
+      app.exit(0);
+    }, 300);
+  }
+
+  ipcMain.handle("choose-log-path", async () => {
+    const dialogOptions: Electron.OpenDialogOptions = {
+      title: "Select your Player.log file",
+      properties: ["openFile"],
+    };
+    const result = settingsWindow ? await dialog.showOpenDialog(settingsWindow, dialogOptions) : await dialog.showOpenDialog(dialogOptions);
+    if (result.canceled || result.filePaths.length === 0) {
+      return { ok: false, canceled: true };
+    }
+    const chosen = result.filePaths[0];
+    const check = locateLogFile(chosen);
+    overlaySettings = { ...overlaySettings, customLogPath: chosen };
+    saveOverlaySettings(overlaySettings);
+    relaunchShortly();
+    return { ok: true, path: chosen, found: check.found, willRestart: true };
+  });
+
+  ipcMain.handle("reset-log-path", () => {
+    overlaySettings = { ...overlaySettings, customLogPath: null };
+    saveOverlaySettings(overlaySettings);
+    relaunchShortly();
+    return { ok: true, willRestart: true };
+  });
+
+  ipcMain.handle("choose-card-db-path", async () => {
+    const dialogOptions: Electron.OpenDialogOptions = {
+      title: "Select the folder containing Arena's Raw_CardDatabase_*.mtga file",
+      properties: ["openDirectory"],
+    };
+    const result = settingsWindow ? await dialog.showOpenDialog(settingsWindow, dialogOptions) : await dialog.showOpenDialog(dialogOptions);
+    if (result.canceled || result.filePaths.length === 0) {
+      return { ok: false, canceled: true };
+    }
+    const chosen = result.filePaths[0];
+    const check = locateCardDatabase(chosen);
+    overlaySettings = { ...overlaySettings, customCardDbPath: chosen };
+    saveOverlaySettings(overlaySettings);
+    return { ok: true, path: chosen, found: check.found, resolved: check.path };
+  });
+
+  ipcMain.handle("reset-card-db-path", () => {
+    overlaySettings = { ...overlaySettings, customCardDbPath: null };
+    saveOverlaySettings(overlaySettings);
+    const check = locateCardDatabase();
+    return { ok: true, found: check.found, resolved: check.path };
+  });
 
   // Milestone 13: persists the deck viewer's "Visual" tab card-thumbnail
   // size choice. Nothing to push live (see CARD_SIZE_PRESETS's comment) -
@@ -939,9 +1056,23 @@ app.whenReady().then(() => {
     pipeline.on("error", (err) => console.error("Tailer error:", err));
     pipeline.start();
   } else {
-    watchingStatus = "Player.log not found - see console";
+    // Milestone 18: "see console" was never actionable for a packaged app -
+    // there's no console to see. The full checked-paths list still goes to
+    // it for anyone who does have one open, but the tray label and a native
+    // notification now both point at the one place a packaged-app user can
+    // actually fix this: Overlay Settings' new "Locations" section, where
+    // they can browse to their real Player.log if auto-detection guessed
+    // wrong (expected to be more common on Windows - see logLocator.ts's
+    // comment on why those paths are unconfirmed).
+    watchingStatus = "Player.log not found - open Overlay Settings";
     console.error(`Could not find Player.log. Checked:\n  ${pipeline.located.checked.join("\n  ")}`);
     console.error("Make sure Options > Account > Detailed Logs (Plugin Support) is on, then relaunch Arena once.");
+    if (Notification.isSupported()) {
+      new Notification({
+        title: "MTGA Tracker",
+        body: "Couldn't find Player.log automatically. Open the tray menu's Overlay Settings to set its location manually.",
+      }).show();
+    }
   }
   rebuildTrayMenu();
 

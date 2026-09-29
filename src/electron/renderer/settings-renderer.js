@@ -15,6 +15,13 @@ const statusEl = document.getElementById("status");
 const autoUpdateCheckbox = document.getElementById("auto-update-checkbox");
 const checkUpdatesBtn = document.getElementById("check-updates-btn");
 const updateStatusEl = document.getElementById("update-status");
+// Milestone 18: the "Locations" section.
+const logPathStatusEl = document.getElementById("log-path-status");
+const chooseLogPathBtn = document.getElementById("choose-log-path-btn");
+const resetLogPathBtn = document.getElementById("reset-log-path-btn");
+const cardDbPathStatusEl = document.getElementById("card-db-path-status");
+const chooseCardDbPathBtn = document.getElementById("choose-card-db-path-btn");
+const resetCardDbPathBtn = document.getElementById("reset-card-db-path-btn");
 
 function showStatus(text) {
   statusEl.textContent = text;
@@ -128,6 +135,80 @@ checkUpdatesBtn.addEventListener("click", async () => {
   }
 });
 
+// Milestone 18: renders one Locations row's status text/style and the
+// enabled state of its own "Auto-detect" reset button (disabled when
+// there's nothing custom to reset - "Reset" wouldn't do anything).
+function renderLocationStatus(statusEl, resetBtn, info, notFoundHint) {
+  const path = info.custom ?? info.resolved;
+  if (info.found && path) {
+    statusEl.textContent = path;
+    statusEl.classList.remove("not-found");
+  } else if (path) {
+    statusEl.textContent = `${path} (not found)`;
+    statusEl.classList.add("not-found");
+  } else {
+    statusEl.textContent = notFoundHint;
+    statusEl.classList.add("not-found");
+  }
+  resetBtn.disabled = !info.custom;
+}
+
+function renderLocations(settings) {
+  renderLocationStatus(logPathStatusEl, resetLogPathBtn, settings.logPath, "Not found automatically.");
+  renderLocationStatus(cardDbPathStatusEl, resetCardDbPathBtn, settings.cardDbPath, "Not found automatically.");
+}
+
+chooseLogPathBtn.addEventListener("click", async () => {
+  chooseLogPathBtn.disabled = true;
+  try {
+    const result = await window.settingsApi.chooseLogPath();
+    if (result && result.ok && result.willRestart) {
+      logPathStatusEl.textContent = "Restarting...";
+      logPathStatusEl.classList.remove("not-found");
+    } else if (result && !result.canceled) {
+      showStatus("Could not set that path.");
+    }
+  } finally {
+    chooseLogPathBtn.disabled = false;
+  }
+});
+
+resetLogPathBtn.addEventListener("click", async () => {
+  resetLogPathBtn.disabled = true;
+  logPathStatusEl.textContent = "Restarting...";
+  logPathStatusEl.classList.remove("not-found");
+  await window.settingsApi.resetLogPath();
+});
+
+chooseCardDbPathBtn.addEventListener("click", async () => {
+  chooseCardDbPathBtn.disabled = true;
+  try {
+    const result = await window.settingsApi.chooseCardDbPath();
+    if (result && result.ok) {
+      renderLocationStatus(
+        cardDbPathStatusEl,
+        resetCardDbPathBtn,
+        { custom: result.path, resolved: result.resolved, found: result.found },
+        "Not found automatically.",
+      );
+    } else if (result && !result.canceled) {
+      showStatus("Could not set that folder.");
+    }
+  } finally {
+    chooseCardDbPathBtn.disabled = false;
+  }
+});
+
+resetCardDbPathBtn.addEventListener("click", async () => {
+  resetCardDbPathBtn.disabled = true;
+  try {
+    const result = await window.settingsApi.resetCardDbPath();
+    renderLocationStatus(cardDbPathStatusEl, resetCardDbPathBtn, { custom: null, resolved: result.resolved, found: result.found }, "Not found automatically.");
+  } finally {
+    resetCardDbPathBtn.disabled = false;
+  }
+});
+
 async function init() {
   const settings = await window.settingsApi.getSettings();
   renderSizeOptions(settings.presets, settings.sizePreset);
@@ -135,6 +216,7 @@ async function init() {
   setOpacitySlider(settings.opacity);
   autoUpdateCheckbox.checked = settings.autoCheckForUpdates !== false;
   updateStatusEl.textContent = settings.appVersion ? `Current version: v${settings.appVersion}` : "";
+  renderLocations(settings);
 }
 
 init();

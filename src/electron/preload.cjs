@@ -40,4 +40,13 @@ contextBridge.exposeInMainWorld("settingsApi", {
   // Milestone 15: the "Updates" section - toggling automatic checks, and an explicit "Check Now" button.
   setAutoCheckForUpdates: (enabled) => ipcRenderer.invoke("set-auto-check-updates", enabled),
   checkForUpdatesNow: () => ipcRenderer.invoke("check-for-updates-now"),
+  // Milestone 18: the "Locations" section - manual overrides for a player
+  // whose Player.log/card database auto-detection guessed wrong. The two
+  // choose* calls open a native file/folder picker in the main process
+  // (nodeIntegration is off here, so this window can't use Node's fs/
+  // dialog itself) and return once the user picks something or cancels.
+  chooseLogPath: () => ipcRenderer.invoke("choose-log-path"),
+  resetLogPath: () => ipcRenderer.invoke("reset-log-path"),
+  chooseCardDbPath: () => ipcRenderer.invoke("choose-card-db-path"),
+  resetCardDbPath: () => ipcRenderer.invoke("reset-card-db-path"),
 });
