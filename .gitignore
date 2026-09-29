@@ -11,3 +11,6 @@ samples/*.json
 data/cards-cache/
 data/deck-viewer/
 data/draft-progress/
+
+# Milestone 15: electron-builder's packaged installers/output (.dmg, .exe, .AppImage, etc.)
+release/

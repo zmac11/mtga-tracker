@@ -1,8 +1,18 @@
 {
   "name": "mtga-tracker",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Background companion app for MTG Arena: reads Player.log to capture match, draft and deck data, with a live overlay.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zmac11/mtga-tracker.git"
+  },
+  "homepage": "https://github.com/zmac11/mtga-tracker#readme",
+  "bugs": {
+    "url": "https://github.com/zmac11/mtga-tracker/issues"
+  },
+  "author": "zmac11",
+  "license": "MIT",
   "type": "module",
   "main": "dist/electron/main.js",
   "scripts": {
@@ -19,13 +29,23 @@
     "test:draftwheel": "tsx src/domain/draftWheel.test.ts",
     "test:deckviewer": "tsx src/deckViewerHtml.test.ts",
     "test:eventhistory": "tsx src/domain/eventHistory.test.ts",
-    "test": "npm run test:parser && npm run test:classifier && npm run test:livestate && npm run test:jsonstream && npm run test:tailer && npm run test:scryfall && npm run test:draftprogress && npm run test:draftwheel && npm run test:deckviewer && npm run test:eventhistory",
+    "test:extractcards": "tsx src/cards/extractArenaCards.test.ts",
+    "test:deckcolors": "tsx src/domain/deckColors.test.ts",
+    "test:colorrollup": "tsx src/domain/colorRollup.test.ts",
+    "test:eventidentity": "tsx src/domain/eventIdentity.test.ts",
+    "test:manacurve": "tsx src/domain/manaCurve.test.ts",
+    "test:rollups": "tsx src/domain/rollups.test.ts",
+    "test": "npm run test:parser && npm run test:classifier && npm run test:livestate && npm run test:jsonstream && npm run test:tailer && npm run test:scryfall && npm run test:draftprogress && npm run test:draftwheel && npm run test:deckviewer && npm run test:eventhistory && npm run test:extractcards && npm run test:deckcolors && npm run test:colorrollup && npm run test:eventidentity && npm run test:manacurve && npm run test:rollups",
     "backfill": "tsx src/backfill.ts",
     "report": "tsx src/report.ts",
     "overlay": "npm run build && electron .",
     "refresh-cards": "tsx src/refreshCards.ts",
     "deck-viewer": "tsx src/generateDeckViewer.ts",
-    "draft-progress": "tsx src/generateDraftProgress.ts"
+    "draft-progress": "tsx src/generateDraftProgress.ts",
+    "dist": "npm run build && electron-builder",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "dist:win": "npm run build && electron-builder --win",
+    "dist:linux": "npm run build && electron-builder --linux"
   },
   "dependencies": {
     "chokidar": "^3.6.0"
@@ -33,10 +53,35 @@
   "devDependencies": {
     "@types/node": "^22.13.0",
     "electron": "^44.4.5",
+    "electron-builder": "^26.15.3",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   },
   "engines": {
     "node": ">=22.13.0"
+  },
+  "build": {
+    "appId": "com.zmac11.mtgatracker",
+    "productName": "MTGA Tracker",
+    "directories": {
+      "output": "release"
+    },
+    "mac": {
+      "category": "public.app-category.games",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ]
+    }
   }
 }
