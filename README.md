@@ -94,6 +94,14 @@ Click the overlay's current-event label (once you're in a match or draft)
 to open its **deck viewer** in your browser; a running draft also gets a
 **draft progress** page that keeps itself up to date while you're picking.
 
+**On Windows**, run Arena in **Borderless Windowed** mode (Arena's own
+Options > Graphics setting), not true exclusive Fullscreen - an
+always-on-top window like this overlay generally can't draw above an
+exclusive-fullscreen game on Windows, which is an OS-level limitation, not
+something this app can work around. Borderless Windowed looks identical to
+fullscreen but is a regular window underneath, so the overlay shows up
+above it normally. This isn't an issue on macOS.
+
 ## Update checks
 
 The Settings window has an "Automatically check for updates" toggle
