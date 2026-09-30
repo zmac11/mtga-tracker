@@ -20,6 +20,8 @@ import { listEventRuns, buildEventRunHistory } from "../domain/eventHistory.js";
 import { generatePastEventsHtml, type PastEventRow } from "../pastEventsHtml.js";
 import { buildLimitedStatsRows, buildStatsCardCatalog } from "../domain/statsRollup.js";
 import { generateStatsHtml } from "../statsHtml.js";
+import { buildOpponentMatchRows } from "../domain/opponentStats.js";
+import { generateOpponentHtml } from "../opponentHtml.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -334,6 +336,8 @@ let openPastEventsPage: (() => void) | null = null;
 // openLimitedStatsPage is defined inside app.whenReady() (needs pipeline),
 // but rebuildTrayMenu() is a top-level function.
 let openLimitedStatsPage: (() => void) | null = null;
+// Milestone 20: same module-level slot pattern as the two tray items above.
+let openOpponentHistoryPage: (() => void) | null = null;
 
 /**
  * Milestone 15: remembers the outcome of the last version check across
@@ -716,6 +720,7 @@ function rebuildTrayMenu(): void {
     { label: "Overlay Settings... (size, transparency, card size)", click: openSettingsWindow },
     { label: "Past Events...", click: () => openPastEventsPage?.() },
     { label: "Limited Stats...", click: () => openLimitedStatsPage?.() },
+    { label: "Opponent History...", click: () => openOpponentHistoryPage?.() },
     { type: "separator" },
     { label: formatLastCardRefreshLabel(cardRefreshStatus), enabled: false },
     {
@@ -1170,6 +1175,47 @@ app.whenReady().then(() => {
       try {
         if (Notification.isSupported()) {
           new Notification({ title: "MTGA Tracker", body: "Couldn't open Past Events - check the logs." }).show();
+        }
+      } catch {
+        // Notifications are a nice-to-have.
+      }
+    } finally {
+      store?.close();
+      cardStore?.close();
+    }
+  };
+
+  /**
+   * Milestone 20 (2026-09-30): "search which opponents I have played
+   * against and winrate against them - option to filter them by format
+   * and search games and deck which I played vs them" - the tray's
+   * "Opponent History..." item. Builds one OpponentMatchRow per match
+   * (across every format, not just limited - see domain/opponentStats.ts)
+   * and renders it as a static page whose search/filter/opponent-detail
+   * view is entirely client-side JS (see opponentHtml.ts), same
+   * self-contained-page convention as Limited Stats above.
+   */
+  openOpponentHistoryPage = (): void => {
+    const dbPath = join(pipeline.dataDir, "tracker.db");
+    let store: TypedEventStore | null = null;
+    let cardStore: CardStore | null = null;
+    try {
+      store = new TypedEventStore(dbPath);
+      cardStore = new CardStore(dbPath);
+      const source = loadEventHistorySource(store);
+      const rows = buildOpponentMatchRows(source);
+
+      const html = generateOpponentHtml(rows);
+      const outDir = join(pipeline.dataDir, "opponents");
+      mkdirSync(outDir, { recursive: true });
+      const outPath = join(outDir, "opponent-history.html");
+      writeFileSync(outPath, html, "utf8");
+      shell.openPath(outPath);
+    } catch (err) {
+      console.error("Failed to generate/open opponent history page:", err);
+      try {
+        if (Notification.isSupported()) {
+          new Notification({ title: "MTGA Tracker", body: "Couldn't open Opponent History - check the logs." }).show();
         }
       } catch {
         // Notifications are a nice-to-have.
