@@ -10,6 +10,7 @@ import type {
   MatchFound,
 } from "./types.js";
 import { computeMatchOutcomes, reconcileWinRate, rollupByEvent, winRate, type WinRate } from "./rollups.js";
+import { buildCourseWindows, assignCourseId, compareTs, type CourseWindow } from "./courseRuns.js";
 
 function dedupeLatestByKey<T>(items: T[], keyFn: (item: T) => string): T[] {
   const map = new Map<string, T>();
@@ -70,7 +71,23 @@ export interface OverlaySnapshot {
   /** The most recent match we've seen, whether or not it's finished. Null before any match is found. */
   match: OverlayMatch | null;
   /** Win/loss record for the current match's event (or the most recent event, if no match is active yet). */
-  eventRecord: (WinRate & { eventId: string; deckName: string | null }) | null;
+  eventRecord:
+    | (WinRate & {
+        eventId: string;
+        /**
+         * Milestone 19: which course this record was scoped to, when the
+         * eventId turned out to have more than one distinct course under
+         * it (see courseRuns.ts) - null in the overwhelmingly common case
+         * (a single course, or none disambiguated yet). electron/main.ts's
+         * "view this event's deck" click passes this straight through to
+         * writeDeckViewerPage/buildDeckViewerData so it opens the SAME
+         * course this record describes, not just whichever the eventId
+         * name happens to match.
+         */
+        courseId: string | null;
+        deckName: string | null;
+      })
+    | null;
   /** Null when no draft is currently in progress (none seen yet, or the last one seen has already completed). */
   currentDraft: DraftProgress | null;
 }
@@ -100,14 +117,23 @@ export class LiveStateTracker {
   private currentMatchId: string | null = null;
   /**
    * Arena's own authoritative win/loss record per event (see CourseStanding
-   * in types.ts) - keyed by eventId. Preferred over the locally-computed
-   * rollup in snapshot() below, since it doesn't depend on us having
-   * personally captured every match (found 2026-09-24: the log-rotation bug
-   * cost us a whole match's worth of capture, and the overlay kept showing
-   * a stale local count even after the fix, because it had no way to know
-   * it was behind Arena's own bookkeeping).
+   * in types.ts). Preferred over the locally-computed rollup in snapshot()
+   * below, since it doesn't depend on us having personally captured every
+   * match (found 2026-09-24: the log-rotation bug cost us a whole match's
+   * worth of capture, and the overlay kept showing a stale local count even
+   * after the fix, because it had no way to know it was behind Arena's own
+   * bookkeeping).
+   *
+   * Milestone 19: kept as the FULL history now (every CourseStanding ever
+   * seen, in arrival order), not a last-write-wins Map keyed by eventId -
+   * found (from a real "Sealed Deck 0-0" report) that a plain per-eventId
+   * Map lets a brand new course silently overwrite an older, completed
+   * one's standing whenever Arena reuses an eventId across two genuinely
+   * separate courses (see courseRuns.ts). snapshot() below now resolves
+   * the CURRENT course first (via courseRuns.ts's window logic) and only
+   * then looks up that specific course's own latest standing.
    */
-  private courseStandings = new Map<string, CourseStanding>();
+  private courseStandingHistory: CourseStanding[] = [];
   /**
    * Milestone 7 phase 5 - live draft progress. Kept as plain unbounded
    * arrays across every draft ever seen this run, same convention as
@@ -122,6 +148,17 @@ export class LiveStateTracker {
   private draftPicksMade: DraftPickMade[] = [];
   private completedDraftIds = new Set<string>();
   private lastActiveDraftId: string | null = null;
+  /**
+   * Milestone 19: full DraftCompleted history (not just completedDraftIds
+   * above) - DraftCompleted carries a real courseId+ts, so it's one of the
+   * signals courseRuns.ts's window-building uses to detect/resolve an
+   * eventId Arena reused across more than one course. A draft-format event
+   * getting the same disambiguation CourseStanding already gave Sealed is
+   * the point of tracking this alongside completedDraftIds, not instead of
+   * it (completedDraftIds still answers a different question - "has this
+   * SPECIFIC draft session finished" - snapshot() needs both).
+   */
+  private draftCompletions: DraftCompleted[] = [];
 
   record(event: DomainEvent): void {
     switch (event.kind) {
@@ -145,10 +182,9 @@ export class LiveStateTracker {
         }
         break;
       case "CourseStanding":
-        // Always overwrite - each EventGetCoursesV2 response is a full
-        // current snapshot, not a delta, so the latest one for an event is
-        // simply correct, whatever we had cached before.
-        this.courseStandings.set(event.eventId, event);
+        // Milestone 19: append, don't overwrite - see courseStandingHistory's
+        // doc comment above for why a last-write-wins Map was wrong.
+        this.courseStandingHistory.push(event);
         break;
       case "DraftPackSeen":
         this.draftPacksSeen.push(event);
@@ -164,6 +200,7 @@ export class LiveStateTracker {
         // (see classifier.ts's comment on currentDraftId) - an edge case
         // that just means there was nothing live to mark as finished anyway.
         if (event.draftId) this.completedDraftIds.add(event.draftId);
+        this.draftCompletions.push(event);
         break;
       // DraftJoined isn't needed for anything shown yet - the join itself
       // carries no pack/pick/progress info, just entry-fee bookkeeping.
@@ -182,13 +219,18 @@ export class LiveStateTracker {
    *
    * Exists because without this, every overlay relaunch started every
    * event's record from a blank slate (both the local rollup AND the
-   * CourseStanding backstop added in milestone 6 - the standing map is only
-   * ever populated by *live* events too), so a correct record already known
-   * from earlier in the session would silently regress to whatever the next
-   * live event happened to say - observed 2026-09-24 as "the record only
-   * corrects itself after finishing another match, not right away" after a
-   * relaunch: the previously-seen correct CourseStanding was sitting in
-   * tracker.db the whole time, just never read back in.
+   * CourseStanding backstop added in milestone 6 - the standing history is
+   * only ever populated by *live* events too), so a correct record already
+   * known from earlier in the session would silently regress to whatever
+   * the next live event happened to say - observed 2026-09-24 as "the
+   * record only corrects itself after finishing another match, not right
+   * away" after a relaunch: the previously-seen correct CourseStanding was
+   * sitting in tracker.db the whole time, just never read back in.
+   *
+   * Milestone 19: also replays PlayerIdentified (see historyForSeeding's
+   * own comment in pipeline.ts for why - myScreenName being null after a
+   * relaunch was independently found to blank out every local win/loss
+   * rollup, not just whichever event this method was originally about).
    */
   seedHistory(events: DomainEvent[]): void {
     for (const event of events) {
@@ -206,7 +248,7 @@ export class LiveStateTracker {
           this.deckSubmissions.push(event);
           break;
         case "CourseStanding":
-          this.courseStandings.set(event.eventId, event);
+          this.courseStandingHistory.push(event);
           break;
         case "DraftPackSeen":
           this.draftPacksSeen.push(event);
@@ -216,6 +258,7 @@ export class LiveStateTracker {
           break;
         case "DraftCompleted":
           if (event.draftId) this.completedDraftIds.add(event.draftId);
+          this.draftCompletions.push(event);
           break;
         default:
           break;
@@ -232,10 +275,26 @@ export class LiveStateTracker {
     // real timestamp across both pack and pick events, not just the last
     // element of one array.
     const activity: Array<DraftPackSeen | DraftPickMade> = [...this.draftPacksSeen, ...this.draftPicksMade].sort((a, b) =>
-      a.ts.localeCompare(b.ts),
+      compareTs(a.ts, b.ts),
     );
     const lastActivity = activity.at(-1);
     if (lastActivity) this.lastActiveDraftId = lastActivity.draftId;
+  }
+
+  /**
+   * Milestone 19: builds this eventId's course windows from whatever we've
+   * accumulated so far (CourseStanding + DraftCompleted - the two courseId-
+   * bearing signals this live tracker keeps; see courseRuns.ts for why
+   * those two and not others). Returns an empty array for the ordinary
+   * one-course-or-none case just as readily as for a genuine collision -
+   * callers check `windows.length > 1`, not this array's mere presence.
+   */
+  private courseWindowsFor(eventId: string): CourseWindow[] {
+    const signals: Array<{ courseId: string; ts: string }> = [
+      ...this.courseStandingHistory.filter((s) => s.eventId === eventId).map((s) => ({ courseId: s.courseId, ts: s.ts })),
+      ...this.draftCompletions.filter((c) => c.eventName === eventId).map((c) => ({ courseId: c.courseId, ts: c.ts })),
+    ];
+    return buildCourseWindows(signals);
   }
 
   snapshot(): OverlaySnapshot {
@@ -279,9 +338,22 @@ export class LiveStateTracker {
     let eventRecord: OverlaySnapshot["eventRecord"] = null;
     const eventId = match?.eventId ?? outcomes.at(-1)?.eventId ?? null;
     if (eventId) {
+      // Milestone 19: resolve which course is CURRENT for this eventId
+      // before computing anything else - see courseRuns.ts and this
+      // class's courseStandingHistory doc comment. `windows` is empty (not
+      // just length <= 1) for the ordinary case, so `disambiguating` below
+      // is false and every filter is a no-op, exactly today's behavior.
+      const windows = this.courseWindowsFor(eventId);
+      const disambiguating = windows.length > 1;
+      const currentCourseId = windows.length > 0 ? windows[windows.length - 1].courseId : null;
+
       const forEvent = rollupByEvent(outcomes).get(eventId) ?? [];
-      const localRate = winRate(forEvent);
-      const standing = this.courseStandings.get(eventId);
+      const scopedToCourse = disambiguating ? forEvent.filter((o) => assignCourseId(o.ts, windows) === currentCourseId) : forEvent;
+      const localRate = winRate(scopedToCourse);
+
+      const standingsForEvent = this.courseStandingHistory.filter((s) => s.eventId === eventId && (!disambiguating || s.courseId === currentCourseId));
+      const standing = standingsForEvent.length > 0 ? standingsForEvent[standingsForEvent.length - 1] : undefined;
+
       // Take the max of what we personally observed and what Arena's own
       // EventGetCoursesV2 last reported, per side. Neither source alone is
       // always current: our own count can undercount if capture ever missed
@@ -293,10 +365,12 @@ export class LiveStateTracker {
       // means the displayed record only ever moves forward, from whichever
       // source currently knows more.
       const reconciled = reconcileWinRate(localRate, standing);
-      const deck = [...this.deckSubmissions].reverse().find((d) => d.eventName === eventId) ?? null;
+      const deck =
+        [...this.deckSubmissions].reverse().find((d) => d.eventName === eventId && (!disambiguating || assignCourseId(d.ts, windows) === currentCourseId)) ?? null;
       eventRecord = {
         ...reconciled,
         eventId,
+        courseId: disambiguating ? currentCourseId : null,
         deckName: deck?.deckName ?? standing?.deckName ?? null,
       };
     }

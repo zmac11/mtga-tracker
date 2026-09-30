@@ -13,8 +13,9 @@ import type { DeckViewerData, DeckViewerVersion, DraftViewerPick, DraftViewerPic
  * deckViewerHtml.ts renderer - milestone 7 phase 4, same convention as
  * eventHistoryLoader.ts. Joins one event run's history (phase 2) against the
  * card catalog (milestone 4/phase 3) to build the exact data shape the
- * deck-viewer page needs. Returns null if this eventId has no data captured
- * at all (see listEventRuns) rather than rendering an empty/misleading page.
+ * deck-viewer page needs. Returns null if this eventId (and, since
+ * milestone 19, courseId - see below) has no data captured at all (see
+ * listEventRuns) rather than rendering an empty/misleading page.
  *
  * Milestone 13: `cardImageWidthPx` is the user's chosen "Card size" setting
  * (see electron/main.ts's CARD_SIZE_PRESETS/get-overlay-settings) for the
@@ -28,13 +29,21 @@ import type { DeckViewerData, DeckViewerVersion, DraftViewerPick, DraftViewerPic
  * fields it returns that this page cares about - comboKey (unchanged,
  * still colorCombo) and the new splashColors - through to DeckViewerData,
  * instead of calling it just for .comboKey and dropping the rest.
+ *
+ * Milestone 19 (2026-09-30): optional `courseId` - pass one of
+ * listEventRuns' own entries' `courseId` through here to get that SPECIFIC
+ * course's data when Arena reused this eventId across more than one real
+ * course (see domain/courseRuns.ts). Left undefined (every call site from
+ * before this milestone), behavior is unchanged: the old blended view for
+ * a collided eventId, exactly as it always rendered.
  */
-export function buildDeckViewerData(eventId: string, store: TypedEventStore, cardStore: CardStore, cardImageWidthPx?: number): DeckViewerData | null {
+export function buildDeckViewerData(eventId: string, store: TypedEventStore, cardStore: CardStore, cardImageWidthPx?: number, courseId?: string | null): DeckViewerData | null {
   const source = loadEventHistorySource(store);
   const knownRuns = listEventRuns(source);
-  if (!knownRuns.some((r) => r.eventId === eventId)) return null;
+  const exists = courseId === undefined ? knownRuns.some((r) => r.eventId === eventId) : knownRuns.some((r) => r.eventId === eventId && r.courseId === courseId);
+  if (!exists) return null;
 
-  const history = buildEventRunHistory(eventId, source);
+  const history = buildEventRunHistory(eventId, source, courseId);
 
   const cardColors = new Map<number, string[]>();
   const cardsById = new Map<number, EnrichedCard>();
@@ -114,6 +123,13 @@ export function buildDeckViewerData(eventId: string, store: TypedEventStore, car
     takenByOthers: a.wheel.takenByOthers.map(toDraftCard),
   }));
 
+  // Milestone 19: only set when this run was actually disambiguated (see
+  // history.courseId's doc comment) - the deck viewer's header shows this
+  // so it's clear which of two same-named runs a page is for.
+  const runLabel = history.courseId
+    ? `run started ${history.runStartedAt ? new Date(history.runStartedAt).toLocaleString() : "an unknown time"}`
+    : null;
+
   return {
     eventId: history.eventId,
     // Milestone 18: history.format is resolved from the deck's own real
@@ -133,5 +149,6 @@ export function buildDeckViewerData(eventId: string, store: TypedEventStore, car
     versions,
     entry,
     reward,
+    ...(runLabel !== null ? { runLabel } : {}),
   };
 }

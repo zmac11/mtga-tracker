@@ -2,6 +2,7 @@ import type { DraftPackSeen, DraftPickMade, DeckSubmitted, DraftCompleted, Match
 import { computeMatchOutcomes, latestStandingByEvent, reconcileWinRate, winRate, type MatchOutcome, type WinRate } from "./rollups.js";
 import { parseEventIdentity, resolveEventFormat, type EventIdentity, type EventFormat } from "./eventIdentity.js";
 import { deriveDeckVersions, type DeckVersion } from "./deckVersions.js";
+import { buildCourseWindows, assignCourseId, compareTs, type CourseWindow } from "./courseRuns.js";
 
 /**
  * Per-event-run history layer (milestone 7 phase 2): for one specific dated
@@ -49,6 +50,17 @@ export interface EventRunHistory {
    */
   format: EventFormat;
   eventId: string;
+  /**
+   * Milestone 19: the specific courseId this history was scoped to, when
+   * the caller disambiguated one (see buildEventRunHistory's `courseId`
+   * param and courseRuns.ts) - null when either no disambiguation was
+   * requested, or only one courseId (or none at all) was ever seen for
+   * this eventId, meaning there was nothing to disambiguate. Most runs
+   * will have this null forever.
+   */
+  courseId: string | null;
+  /** Milestone 19: when courseId above is non-null, the ts this specific course's window started at (its earliest CourseStanding/DraftCompleted/EventCardPool/EventReward) - for a human-readable "which run is this" label (see deckViewerLoader.ts). Null whenever courseId is null. */
+  runStartedAt: string | null;
   deck: EventRunDeck | null;
   /** Full drafted card pool (grpIds, duplicates included e.g. for basics), from DraftCompleted - null if not captured for this run. */
   cardPool: number[] | null;
@@ -107,8 +119,8 @@ export interface EventHistorySource {
    * winRate computed here can be reconciled the same way the overlay's
    * live eventRecord already is - see buildEventRunHistory below. Order
    * doesn't need to be pre-filtered/deduped by the caller; only the LATEST
-   * entry for a given eventId is ever used (any earlier duplicates or
-   * stale snapshots for that event are simply ignored).
+   * entry for a given eventId (or eventId+courseId - see milestone 19) is
+   * ever used (any earlier duplicates or stale snapshots are ignored).
    */
   courseStandings: CourseStanding[];
   myScreenName: string | null;
@@ -121,14 +133,58 @@ function dedupeLatestByKey<T>(items: T[], keyFn: (item: T) => string): T[] {
 }
 
 /**
+ * Milestone 19: gathers every {courseId, ts} signal for one eventId, from
+ * the four event kinds that actually carry a real courseId (see
+ * courseRuns.ts's header comment for why MatchFound/DeckSubmitted/
+ * DraftJoined can't contribute here), and turns them into ordered time
+ * windows. `windows.length <= 1` is the "nothing to disambiguate" signal
+ * every filter below checks before applying any courseId-based filtering,
+ * so a normal event (one courseId, or literally zero signal at all) is
+ * completely unaffected by any of this.
+ */
+function courseWindowsForEvent(eventId: string, source: EventHistorySource): CourseWindow[] {
+  const signals: Array<{ courseId: string; ts: string }> = [
+    ...source.courseStandings.filter((s) => s.eventId === eventId).map((s) => ({ courseId: s.courseId, ts: s.ts })),
+    ...source.completions.filter((c) => c.eventName === eventId).map((c) => ({ courseId: c.courseId, ts: c.ts })),
+    ...source.cardPools.filter((p) => p.eventId === eventId).map((p) => ({ courseId: p.courseId, ts: p.ts })),
+    ...source.rewards.filter((r) => r.eventId === eventId).map((r) => ({ courseId: r.courseId, ts: r.ts })),
+  ];
+  return buildCourseWindows(signals);
+}
+
+/**
  * Builds the full history for one specific event run. `eventId` is the raw
  * dated eventId/eventName (e.g. "ContenderDraft_HOB_20260824") - the "run"
  * granularity, not the coarser "event type" grouping from eventIdentity.ts.
+ *
+ * Milestone 19: `courseId`, when passed, scopes this to just that one
+ * course's data - for the (rare) case where Arena reused this eventId
+ * across more than one genuinely separate course (see courseRuns.ts).
+ * Left `undefined` (the default - every call site from before this
+ * milestone), behavior is EXACTLY what it always was: every match/deck/
+ * join/etc. for this eventId, regardless of course, blended together (the
+ * pre-existing behavior for a collided eventId, still what report.ts's
+ * `--event=` gets since it hasn't been updated to pass a courseId - see
+ * its own comment). Passing `courseId` (a real one from listEventRuns, or
+ * explicitly `null` for "the sole/undisambiguated run") only changes
+ * anything when courseWindowsForEvent finds more than one window; a
+ * normal single-course event behaves identically either way.
  */
-export function buildEventRunHistory(eventId: string, source: EventHistorySource): EventRunHistory {
+export function buildEventRunHistory(eventId: string, source: EventHistorySource, courseId?: string | null): EventRunHistory {
   const identity = parseEventIdentity(eventId);
 
-  const completion = source.completions.find((c) => c.eventName === eventId) ?? null;
+  const windows = courseId !== undefined ? courseWindowsForEvent(eventId, source) : [];
+  const disambiguating = windows.length > 1;
+  // For the 4 kinds that carry a real courseId, filter by direct equality -
+  // more precise than the ts heuristic below, since these don't need one.
+  const matchesCourseId = <T extends { courseId: string }>(item: T): boolean => !disambiguating || item.courseId === courseId;
+  // For everything else (no real courseId field to check - see this file's
+  // and courseRuns.ts's header comments), fall back to the ts window.
+  const matchesCourseWindow = (ts: string): boolean => !disambiguating || assignCourseId(ts, windows) === courseId;
+
+  const runStartedAt = disambiguating ? (windows.find((w) => w.courseId === courseId)?.startTs ?? null) : null;
+
+  const completion = source.completions.find((c) => c.eventName === eventId && matchesCourseId(c)) ?? null;
 
   // Milestone 17: was `source.decks.find(...)` - the FIRST DeckSubmitted
   // for this run, i.e. the ORIGINAL deck, not the current one, whenever a
@@ -137,8 +193,8 @@ export function buildEventRunHistory(eventId: string, source: EventHistorySource
   // submission for this run is now kept (decksForRun) so deriveDeckVersions
   // can see the full history; "the current deck" is still just the latest
   // one, by ts, for every other field below that expects a single deck.
-  const decksForRun = source.decks.filter((d) => d.eventName === eventId);
-  const deckSubmission = decksForRun.length > 0 ? [...decksForRun].sort((a, b) => a.ts.localeCompare(b.ts)).at(-1)! : null;
+  const decksForRun = source.decks.filter((d) => d.eventName === eventId && matchesCourseWindow(d.ts));
+  const deckSubmission = decksForRun.length > 0 ? [...decksForRun].sort((a, b) => compareTs(a.ts, b.ts)).at(-1)! : null;
 
   // DraftPickMade/DraftPackSeen are linked by draftId, not eventId directly
   // (see types.ts's comment on DraftPackSeen.draftId). DraftCompleted.draftId
@@ -163,8 +219,8 @@ export function buildEventRunHistory(eventId: string, source: EventHistorySource
   // types.ts. Latest-by-ts wins, same "keep only the latest snapshot"
   // convention as courseStandings/latestStandingByEvent (a pool shouldn't
   // actually change once granted, but this is the safe choice either way).
-  const cardPoolsForRun = source.cardPools.filter((p) => p.eventId === eventId);
-  const latestCardPool = cardPoolsForRun.length > 0 ? [...cardPoolsForRun].sort((a, b) => a.ts.localeCompare(b.ts)).at(-1)! : null;
+  const cardPoolsForRun = source.cardPools.filter((p) => p.eventId === eventId && matchesCourseId(p));
+  const latestCardPool = cardPoolsForRun.length > 0 ? [...cardPoolsForRun].sort((a, b) => compareTs(a.ts, b.ts)).at(-1)! : null;
   const poolForSideboard = completion?.cardPool ?? latestCardPool?.cardPool ?? null;
 
   let deck: EventRunDeck | null = null;
@@ -191,7 +247,7 @@ export function buildEventRunHistory(eventId: string, source: EventHistorySource
   }
 
   const allOutcomes = computeMatchOutcomes(source.matchFounds, source.matchCompletions, source.myScreenName);
-  const matches = allOutcomes.filter((o) => o.eventId === eventId);
+  const matches = allOutcomes.filter((o) => o.eventId === eventId && matchesCourseWindow(o.ts));
 
   // Reconciled against Arena's own EventGetCoursesV2 record the same way
   // the overlay's live eventRecord already is (milestone 6) - see
@@ -199,10 +255,13 @@ export function buildEventRunHistory(eventId: string, source: EventHistorySource
   // per-run record could (and did, for a real event affected by the
   // log-rotation bug) show a different, lower number than the overlay for
   // the exact same event, purely because local capture missed a match
-  // Arena's own bookkeeping still had. latestStandingByEvent picks the
-  // LATEST CourseStanding captured for this eventId, since
-  // source.courseStandings isn't pre-filtered to one entry per event.
-  const standing = latestStandingByEvent(source.courseStandings).get(eventId) ?? null;
+  // Arena's own bookkeeping still had. Milestone 19: when disambiguating,
+  // picks the latest standing for THIS courseId specifically, rather than
+  // latestStandingByEvent's plain per-eventId lookup (which would still
+  // hand back whichever course's standing happened to be reported latest,
+  // regardless of which course this call is scoped to).
+  const standingsForRun = source.courseStandings.filter((s) => s.eventId === eventId && matchesCourseId(s));
+  const standing = standingsForRun.length > 0 ? [...standingsForRun].sort((a, b) => compareTs(a.ts, b.ts)).at(-1)! : (latestStandingByEvent(source.courseStandings).get(eventId) ?? null);
 
   // Milestone 17: per-version breakdown, built from the FULL submission
   // history for this run (not just the latest) plus this run's matches -
@@ -214,19 +273,21 @@ export function buildEventRunHistory(eventId: string, source: EventHistorySource
   // Entry cost: a run can in principle have more than one DraftJoined (e.g.
   // if a player left and rejoined) - the latest one is what actually paid
   // for the run currently in progress/completed.
-  const joinsForRun = source.joins.filter((j) => j.eventName === eventId);
-  const latestJoin = joinsForRun.length > 0 ? [...joinsForRun].sort((a, b) => a.ts.localeCompare(b.ts)).at(-1)! : null;
+  const joinsForRun = source.joins.filter((j) => j.eventName === eventId && matchesCourseWindow(j.ts));
+  const latestJoin = joinsForRun.length > 0 ? [...joinsForRun].sort((a, b) => compareTs(a.ts, b.ts)).at(-1)! : null;
   const entry = latestJoin ? { currencyType: latestJoin.entryCurrencyType, amountPaid: latestJoin.entryCurrencyPaid } : null;
 
   // Reward: normally at most one claim per run, but take the latest if
   // more than one was somehow captured, same convention as entry above.
-  const rewardsForRun = source.rewards.filter((r) => r.eventId === eventId);
-  const reward = rewardsForRun.length > 0 ? [...rewardsForRun].sort((a, b) => a.ts.localeCompare(b.ts)).at(-1)! : null;
+  const rewardsForRun = source.rewards.filter((r) => r.eventId === eventId && matchesCourseId(r));
+  const reward = rewardsForRun.length > 0 ? [...rewardsForRun].sort((a, b) => compareTs(a.ts, b.ts)).at(-1)! : null;
 
   return {
     identity,
     format: resolveEventFormat(identity, deckSubmission?.format),
     eventId,
+    courseId: disambiguating ? (courseId ?? null) : null,
+    runStartedAt,
     deck,
     cardPool: poolForSideboard,
     picks,
@@ -239,15 +300,50 @@ export function buildEventRunHistory(eventId: string, source: EventHistorySource
   };
 }
 
+export interface EventRunRef {
+  eventId: string;
+  /**
+   * Milestone 19: null when only one (or zero) distinct courseId was ever
+   * observed for this eventId - the common case, meaning there's nothing
+   * to disambiguate. Non-null only when courseWindowsForEvent found more
+   * than one courseId sharing this eventId (see courseRuns.ts) - pass this
+   * straight through to buildEventRunHistory/buildDeckViewerData to get
+   * that specific course's own data instead of the old blended view.
+   */
+  courseId: string | null;
+  identity: EventIdentity;
+}
+
 /**
  * Every distinct event run we have any data for at all (a draft completion,
  * a deck submission, or a match), each with its parsed identity - the index
- * a future "pick an event run to view" UI would list from.
+ * a future "pick an event run to view" UI would list from (built into one,
+ * tonight - see electron/main.ts's "Past Events..." tray item).
+ *
+ * Milestone 19: an eventId that Arena reused across more than one real
+ * course (see courseRuns.ts) now yields one entry PER courseId instead of
+ * one blended entry - callers that iterate this list and pass each row's
+ * courseId through to buildEventRunHistory/buildDeckViewerData get each
+ * course's own correct data. An eventId with only one courseId (or none at
+ * all, e.g. a match-only run with no CourseStanding ever captured) still
+ * yields exactly one entry with `courseId: null`, identical to this
+ * function's behavior before this milestone.
  */
-export function listEventRuns(source: EventHistorySource): Array<{ eventId: string; identity: EventIdentity }> {
+export function listEventRuns(source: EventHistorySource): EventRunRef[] {
   const ids = new Set<string>();
   for (const c of source.completions) ids.add(c.eventName);
   for (const d of source.decks) ids.add(d.eventName);
   for (const m of source.matchFounds) if (m.eventId) ids.add(m.eventId);
-  return [...ids].map((eventId) => ({ eventId, identity: parseEventIdentity(eventId) }));
+
+  const result: EventRunRef[] = [];
+  for (const eventId of ids) {
+    const identity = parseEventIdentity(eventId);
+    const windows = courseWindowsForEvent(eventId, source);
+    if (windows.length <= 1) {
+      result.push({ eventId, courseId: null, identity });
+    } else {
+      for (const w of windows) result.push({ eventId, courseId: w.courseId, identity });
+    }
+  }
+  return result;
 }

@@ -1,5 +1,6 @@
 import type { DeckSubmitted } from "./types.js";
 import { winRate, type MatchOutcome, type WinRate } from "./rollups.js";
+import { compareTs } from "./courseRuns.js";
 
 /**
  * Milestone 17: tracks every distinct deck a player actually PLAYED within
@@ -86,7 +87,7 @@ function deckContentKey(mainDeck: Array<{ cardId: number; quantity: number }>, s
  * file header for why an unplayed resubmission isn't a "version" here.
  */
 export function deriveDeckVersions(submissions: DeckSubmitted[], matches: MatchOutcome[]): DeckVersion[] {
-  const sorted = [...submissions].sort((a, b) => a.ts.localeCompare(b.ts));
+  const sorted = [...submissions].sort((a, b) => compareTs(a.ts, b.ts));
 
   // Collapse consecutive submissions with identical deck content - a
   // resubmit of the exact same list (e.g. Arena re-sending state) isn't a
@@ -102,7 +103,7 @@ export function deriveDeckVersions(submissions: DeckSubmitted[], matches: MatchO
   }
   if (distinct.length === 0) return [];
 
-  const sortedMatches = [...matches].sort((a, b) => a.ts.localeCompare(b.ts));
+  const sortedMatches = [...matches].sort((a, b) => compareTs(a.ts, b.ts));
 
   const versions: DeckVersion[] = distinct.map((s, i) => ({
     deckId: s.deckId,

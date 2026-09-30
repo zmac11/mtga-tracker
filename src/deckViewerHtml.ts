@@ -130,6 +130,8 @@ export interface DeckViewerData {
   reward?: DeckViewerReward | null;
   /** Milestone 19: the app version that generated this page, shown in a small footer - so a page saved/screenshotted from an older run is identifiable later. Optional (omitted entirely rather than shown blank) for older callers/tests that don't pass it. */
   appVersion?: string;
+  /** Milestone 19 (2026-09-30): "run started <when>" - set only when Arena reused this eventId across more than one real course and this page is for one specific course (see domain/courseRuns.ts) - shown in the header so two pages that would otherwise look identical are distinguishable. Omitted/null for the overwhelmingly common single-course case. */
+  runLabel?: string | null;
 }
 
 /** Milestone 17: one played deck version, already resolved to full ViewerCards (same shape the "Deck list"/"Visual"/"Curve" tabs use) for the "Versions" tab to render with the existing deckListHtml. */
@@ -555,7 +557,7 @@ export function generateDeckViewerHtml(data: DeckViewerData): string {
 <body>
   <div class="header">
     <h1>${escapeHtml(data.deckName ?? "(no deck submission captured)")}</h1>
-    <div class="meta">[${escapeHtml(data.format)}] ${escapeHtml(data.definitionLabel)} &middot; ${escapeHtml(data.eventId)}</div>
+    <div class="meta">[${escapeHtml(data.format)}] ${escapeHtml(data.definitionLabel)} &middot; ${escapeHtml(data.eventId)}${data.runLabel ? ` &middot; <strong>${escapeHtml(data.runLabel)}</strong>` : ""}</div>
     <div class="meta">Colors: <strong>${escapeHtml(data.colorCombo)}</strong>${splashLine} &middot; Record: <strong>${recordLine}</strong>${avgMvLine}${entryLine}${rewardLine}</div>
   </div>
 

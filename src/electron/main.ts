@@ -1060,22 +1060,27 @@ app.whenReady().then(() => {
   // on click, not something that needs to stay open, and keeping it
   // separate avoids any risk of interfering with the pipeline's own
   // long-lived connection.
-  function writeDeckViewerPage(eventId: string, store: TypedEventStore, cardStore: CardStore): { ok: true; outPath: string; fileName: string } | { ok: false; reason: string } {
+  function writeDeckViewerPage(eventId: string, store: TypedEventStore, cardStore: CardStore, courseId?: string | null): { ok: true; outPath: string; fileName: string } | { ok: false; reason: string } {
     const cardImageWidthPx = (CARD_SIZE_PRESETS[overlaySettings.cardSizePreset] ?? CARD_SIZE_PRESETS[DEFAULT_CARD_SIZE_PRESET]).widthPx;
-    const data = buildDeckViewerData(eventId, store, cardStore, cardImageWidthPx);
+    const data = buildDeckViewerData(eventId, store, cardStore, cardImageWidthPx, courseId);
     if (!data) return { ok: false, reason: `No deck/draft data captured yet for ${eventId}.` };
 
     const html = generateDeckViewerHtml({ ...data, appVersion: app.getVersion() });
     const outDir = join(pipeline.dataDir, "deck-viewer");
     mkdirSync(outDir, { recursive: true });
-    const fileName = `${eventId.replace(/[^A-Za-z0-9_-]/g, "_")}.html`;
+    // Milestone 19: courseId-suffixed filename only when one was actually
+    // passed (a real, disambiguated run - see buildDeckViewerData's own
+    // comment) - the ordinary single-course case keeps its original,
+    // stable filename exactly as before.
+    const fileName = courseId ? `${eventId.replace(/[^A-Za-z0-9_-]/g, "_")}__${courseId.replace(/[^A-Za-z0-9_-]/g, "_")}.html` : `${eventId.replace(/[^A-Za-z0-9_-]/g, "_")}.html`;
     const outPath = join(outDir, fileName);
     writeFileSync(outPath, html, "utf8");
     return { ok: true, outPath, fileName };
   }
 
   ipcMain.handle("open-deck-viewer", () => {
-    const currentEventId = liveState.snapshot().eventRecord?.eventId;
+    const currentEventRecord = liveState.snapshot().eventRecord;
+    const currentEventId = currentEventRecord?.eventId;
     if (!currentEventId) return { ok: false, reason: "No current event to show yet." };
 
     const dbPath = join(pipeline.dataDir, "tracker.db");
@@ -1084,7 +1089,11 @@ app.whenReady().then(() => {
     try {
       store = new TypedEventStore(dbPath);
       cardStore = new CardStore(dbPath);
-      const result = writeDeckViewerPage(currentEventId, store, cardStore);
+      // Milestone 19: pass the live snapshot's own resolved courseId
+      // through (null in the ordinary case) so this opens the SAME course
+      // the overlay's tile currently describes, not just whichever course
+      // happens to share this eventId - see liveState.ts/courseRuns.ts.
+      const result = writeDeckViewerPage(currentEventId, store, cardStore, currentEventRecord?.courseId ?? null);
       if (!result.ok) return result;
       shell.openPath(result.outPath);
       return { ok: true };
@@ -1105,17 +1114,14 @@ app.whenReady().then(() => {
    * linking to each one, and opens the index. Same one-shot fresh-
    * connection approach as open-deck-viewer.
    *
-   * Known limitation, found while investigating the 2026-09-30 "Sealed
-   * Deck 0-0" report: Arena can reuse the exact same eventId for two
-   * genuinely different course runs (confirmed in this user's own data -
-   * a completed 4-3 Sealed run and a later, separate 0-0 run both under
-   * "Sealed_FRA_20260929", different courseId each time). Every lookup in
-   * this project (listEventRuns, buildEventRunHistory, and
-   * LiveStateTracker.courseStandings) is keyed by eventId alone, so this
-   * page's entry for such an eventId shows a blend (the latest deck
-   * submission, latest standing) rather than either run individually -
-   * not fixed here; would need courseId threaded through the whole
-   * eventHistory/liveState layer to do properly.
+   * Milestone 19 follow-up (2026-09-30): listEventRuns now yields one
+   * entry per courseId whenever Arena reused an eventId across more than
+   * one genuinely separate course (confirmed in this user's own data - a
+   * completed 4-3 Sealed run and a later, separate 0-0 run both under
+   * "Sealed_FRA_20260929", different courseId each time - see
+   * domain/courseRuns.ts). Passing each entry's courseId through to
+   * writeDeckViewerPage/buildEventRunHistory below gets that course's own
+   * data, and its own distinctly-named page, instead of the old blend.
    */
   openPastEventsPage = (): void => {
     const dbPath = join(pipeline.dataDir, "tracker.db");
@@ -1129,9 +1135,9 @@ app.whenReady().then(() => {
 
       const rows: PastEventRow[] = [];
       for (const run of knownRuns) {
-        const written = writeDeckViewerPage(run.eventId, store, cardStore);
+        const written = writeDeckViewerPage(run.eventId, store, cardStore, run.courseId);
         if (!written.ok) continue; // shouldn't happen for a listed run, but never let one bad run break the whole index
-        const history = buildEventRunHistory(run.eventId, source);
+        const history = buildEventRunHistory(run.eventId, source, run.courseId);
         rows.push({
           eventId: run.eventId,
           identity: run.identity,
@@ -1139,6 +1145,10 @@ app.whenReady().then(() => {
           deckName: history.deck?.deckName ?? null,
           winRate: history.winRate,
           fileName: written.fileName,
+          courseId: run.courseId,
+          runLabel: history.courseId
+            ? `run started ${history.runStartedAt ? new Date(history.runStartedAt).toLocaleString() : "an unknown time"}`
+            : null,
         });
       }
 

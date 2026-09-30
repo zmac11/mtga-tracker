@@ -5,19 +5,23 @@ import type { WinRate } from "./domain/rollups.js";
 /**
  * Milestone 19: "open a previous event/deck, not just the current one" -
  * the tray's "Past Events..." item generates this index page, listing every
- * event run we have any data for (same set eventHistory.ts's listEventRuns
- * already builds - this was already commented there as "the index a future
- * 'pick an event run to view' UI would list from"), each linking to its own
- * deck-viewer page (electron/main.ts writes one such page per entry, right
- * before opening this index, using the exact same buildDeckViewerData/
- * generateDeckViewerHtml path the current-event click already uses - see
- * that file's open-deck-viewer handler). No new IPC/renderer surface: this
- * is a plain static page linking to other plain static pages, the same
- * "self-contained, no local server" approach as every other generated page
- * in this project.
+ * event run we have any data for (see eventHistory.ts's listEventRuns),
+ * each linking to its own deck-viewer page (electron/main.ts writes one
+ * such page per entry, right before opening this index, using the exact
+ * same buildDeckViewerData/generateDeckViewerHtml path the current-event
+ * click already uses - see that file's open-deck-viewer handler). No new
+ * IPC/renderer surface: this is a plain static page linking to other plain
+ * static pages, the same "self-contained, no local server" approach as
+ * every other generated page in this project.
  *
  * Deliberately NOT auto-refreshing (unlike draftProgressHtml.ts's pages) -
  * this is a browse-history list, not something changing while it's open.
+ *
+ * Milestone 19 follow-up (2026-09-30): `courseId`/`runLabel` are non-null
+ * only for a run that listEventRuns had to split apart because Arena
+ * reused one eventId across more than one real course (see
+ * domain/courseRuns.ts) - shown as a small badge so two rows sharing a
+ * name are still distinguishable at a glance.
  */
 export interface PastEventRow {
   eventId: string;
@@ -27,6 +31,10 @@ export interface PastEventRow {
   winRate: WinRate;
   /** Filename (no path) of this run's own generated deck-viewer page, for the link href. */
   fileName: string;
+  /** Non-null only for a disambiguated run - see this file's header comment. */
+  courseId: string | null;
+  /** Human-readable "run started <when>" label, set exactly when courseId is - see deckViewerLoader.ts's identical label for the deck-viewer page itself. */
+  runLabel: string | null;
 }
 
 function formatDateStamp(dateStamp: string | null): string {
@@ -38,10 +46,11 @@ function rowHtml(row: PastEventRow): string {
   const date = formatDateStamp(row.identity.dateStamp);
   const record = row.winRate.total > 0 ? `${row.winRate.wins}-${row.winRate.losses} (${row.winRate.pct})` : "no decided matches";
   const deckLabel = row.deckName ? escapeHtml(row.deckName) : "(no deck captured)";
+  const runBadge = row.runLabel ? ` <span class="badge">${escapeHtml(row.runLabel)}</span>` : "";
   return `
     <li class="run-row">
       <a href="./${escapeHtml(row.fileName)}">
-        <span class="event-name">${escapeHtml(row.identity.definitionLabel)}</span>
+        <span class="event-name">${escapeHtml(row.identity.definitionLabel)}${runBadge}</span>
         <span class="muted">${escapeHtml(row.format)}${date ? ` &middot; ${escapeHtml(date)}` : ""}</span>
       </a>
       <div class="sub">
@@ -55,7 +64,13 @@ export function generatePastEventsHtml(rows: PastEventRow[]): string {
   // Newest first: dateStamp sorts lexicographically the same as
   // chronologically (YYYYMMDD, per eventIdentity.ts) - anything without one
   // (an unparsed/unusual eventId) sinks to the bottom rather than the top.
-  const sorted = [...rows].sort((a, b) => (b.identity.dateStamp ?? "").localeCompare(a.identity.dateStamp ?? ""));
+  // Two rows sharing an eventId (a disambiguated collision) keep their
+  // relative order via runLabel as a secondary key, earliest run first.
+  const sorted = [...rows].sort((a, b) => {
+    const byDate = (b.identity.dateStamp ?? "").localeCompare(a.identity.dateStamp ?? "");
+    if (byDate !== 0) return byDate;
+    return (a.runLabel ?? "").localeCompare(b.runLabel ?? "");
+  });
 
   const body =
     sorted.length > 0
@@ -78,6 +93,7 @@ export function generatePastEventsHtml(rows: PastEventRow[]): string {
   li.run-row a { display: flex; justify-content: space-between; align-items: baseline; text-decoration: none; color: #e8e8ec; gap: 12px; }
   li.run-row a:hover .event-name { text-decoration: underline; }
   .event-name { font-weight: 600; }
+  .badge { font-weight: 400; font-size: 0.75rem; color: #9fa6ff; background: #262a4a; border-radius: 4px; padding: 1px 6px; margin-left: 6px; }
   .sub { display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px; font-size: 0.85rem; color: #cfd2dc; gap: 12px; }
 </style>
 </head>
