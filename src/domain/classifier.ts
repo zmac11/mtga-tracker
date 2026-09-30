@@ -481,6 +481,7 @@ export class Classifier {
             lifeTotal: Number(p.lifeTotal ?? 0),
             status: String(p.status ?? ""),
             turnNumber: typeof p.turnNumber === "number" ? p.turnNumber : undefined,
+            mulliganCount: typeof p.mulliganCount === "number" ? p.mulliganCount : undefined,
           }))
         : [];
       const turnInfo = isObj(gsm.turnInfo) ? gsm.turnInfo : null;

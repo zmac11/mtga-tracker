@@ -168,7 +168,18 @@ export interface GameStateSnapshot {
   stage: string | null; // e.g. GameStage_Play, GameStage_GameOver
   turnActivePlayer: number | null;
   turnDecisionPlayer: number | null;
-  players: Array<{ systemSeatNumber: number; lifeTotal: number; status: string; turnNumber?: number }>;
+  /**
+   * Milestone 20 (2026-09-30): "track ... number of mulgains (me and
+   * opponent)" - `mulliganCount` sits in the exact same per-player object
+   * this already partially parses (systemSeatNumber/lifeTotal/status/
+   * turnNumber), confirmed real from a captured `mulliganReq` shape
+   * (`{mulliganType: "MulliganType_London", mulliganCount: 1}`) - optional
+   * and omitted (not 0) for a player who hasn't mulliganed, matching this
+   * project's already-confirmed "Arena omits zero-valued fields" convention
+   * (see the CurrentLosses/InventoryGold gotchas in architecture-and-
+   * status.md) - defaulted to 0 by matchDetails.ts's consumer, not here.
+   */
+  players: Array<{ systemSeatNumber: number; lifeTotal: number; status: string; turnNumber?: number; mulliganCount?: number }>;
   ts: string;
 }
 

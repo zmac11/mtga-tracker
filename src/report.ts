@@ -4,6 +4,7 @@ import { TypedEventStore } from "./db/sqliteStore.js";
 import type { DraftPickMade } from "./domain/types.js";
 import { computeMatchOutcomes, latestStandingByEvent, reconciledWinRateByRun, rollupByEvent, rollupByEventDefinition, rollupBySubtype, rollupByFormat } from "./domain/rollups.js";
 import { buildEventRunHistory, listEventRuns } from "./domain/eventHistory.js";
+import { buildMatchGameDetails } from "./domain/matchDetails.js";
 import { loadEventHistorySource } from "./eventHistoryLoader.js";
 import { deriveDeckColors } from "./domain/deckColors.js";
 import { rollupByColorCombo, type RunColorInfo } from "./domain/colorRollup.js";
@@ -116,6 +117,15 @@ function main() {
   // both the per-match printout and the win-rate rollups.
   const matchOutcomes = computeMatchOutcomes(matchFounds, matchCompletions, myScreenName);
 
+  // Milestone 20: "who played first, number of rounds, number of
+  // mulligans" - built from GameStateSnapshot rows already captured for
+  // every match (see matchDetails.ts for why no new classifier shape was
+  // needed for the play/draw and turn-count pieces). A match this can't
+  // resolve (e.g. captured before myScreenName was known, or with no
+  // GameStateSnapshot data at all) is simply absent from the map.
+  const gameStateSnapshots = store.all("GameStateSnapshot");
+  const matchDetails = buildMatchGameDetails(gameStateSnapshots, matchFounds, myScreenName);
+
   console.log("\n=== Matches ===");
   if (matchOutcomes.length === 0) {
     console.log("(none captured yet)");
@@ -131,6 +141,15 @@ function main() {
     const gameScore = m.games && m.games.wins + m.games.losses > 1 ? ` (${m.games.wins}-${m.games.losses})` : "";
     const label = m.outcome ? `${m.outcome} (${m.reason})${gameScore}` : "in progress / result not captured";
     console.log(`  - vs ${m.opponent} [event: ${m.eventId ?? "?"}] -> ${label}`);
+    const games = matchDetails.get(m.matchId);
+    if (games) {
+      for (const g of games) {
+        const onPlay = g.iPlayedFirst === null ? "play/draw unknown" : g.iPlayedFirst ? "I played first" : "I drew first";
+        const turns = g.turnCount !== null ? `${g.turnCount} turns` : "turn count unknown";
+        const gameLabel = games.length > 1 ? `Game ${g.gameNumber}: ` : "";
+        console.log(`      ${gameLabel}${onPlay}, ${turns}, mulligans: me ${g.myMulligans}, opp ${g.opponentMulligans}`);
+      }
+    }
   }
 
   // --- Win rate rollups ---
