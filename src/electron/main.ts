@@ -15,6 +15,9 @@ import { buildDeckViewerData } from "../deckViewerLoader.js";
 import { generateDeckViewerHtml } from "../deckViewerHtml.js";
 import { buildDraftProgressData } from "../draftProgressLoader.js";
 import { generateDraftProgressHtml, generateNoDraftInProgressHtml } from "../draftProgressHtml.js";
+import { loadEventHistorySource } from "../eventHistoryLoader.js";
+import { listEventRuns, buildEventRunHistory } from "../domain/eventHistory.js";
+import { generatePastEventsHtml, type PastEventRow } from "../pastEventsHtml.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -319,6 +322,12 @@ let overlaySettings: OverlaySettings = {
 // rebuildTrayMenu() can stay a plain top-level function like the rest of
 // this file's UI wiring.
 let runCardRefresh: ((skipEnrich: boolean) => void) | null = null;
+// Milestone 19: same "module-level slot" pattern as runCardRefresh above -
+// openPastEventsPage is defined inside app.whenReady() (it needs pipeline/
+// overlaySettings, only available there), but rebuildTrayMenu() is a
+// top-level function, so it reaches this via the slot rather than a direct
+// reference.
+let openPastEventsPage: (() => void) | null = null;
 
 /**
  * Milestone 15: remembers the outcome of the last version check across
@@ -699,6 +708,7 @@ function rebuildTrayMenu(): void {
       click: toggleOverlayHidden,
     },
     { label: "Overlay Settings... (size, transparency, card size)", click: openSettingsWindow },
+    { label: "Past Events...", click: () => openPastEventsPage?.() },
     { type: "separator" },
     { label: formatLastCardRefreshLabel(cardRefreshStatus), enabled: false },
     {
@@ -1039,11 +1049,31 @@ app.whenReady().then(() => {
   // Milestone 7 phase 4: "click the current event to view its deck" - opens
   // a generated static HTML page (data/deck-viewer/<eventId>.html) in the
   // user's default browser, per the UI-surface decision in
-  // feature-roadmap-milestone7.md. Deliberately opens fresh, short-lived
-  // TypedEventStore/CardStore connections rather than sharing the pipeline's
-  // - this is a one-shot read-then-close on click, not something that needs
-  // to stay open, and keeping it separate avoids any risk of interfering
-  // with the pipeline's own long-lived connection.
+  // feature-roadmap-milestone7.md.
+  //
+  // Milestone 19: pulled the generate-and-write part out into its own
+  // helper (writeDeckViewerPage below) so openPastEventsPage can reuse it
+  // for every past run, not just the current one - "I want to be able to
+  // open even previous events and decks I played" (2026-09-30). Each call
+  // still opens fresh, short-lived TypedEventStore/CardStore connections
+  // rather than sharing the pipeline's - this is a one-shot read-then-close
+  // on click, not something that needs to stay open, and keeping it
+  // separate avoids any risk of interfering with the pipeline's own
+  // long-lived connection.
+  function writeDeckViewerPage(eventId: string, store: TypedEventStore, cardStore: CardStore): { ok: true; outPath: string; fileName: string } | { ok: false; reason: string } {
+    const cardImageWidthPx = (CARD_SIZE_PRESETS[overlaySettings.cardSizePreset] ?? CARD_SIZE_PRESETS[DEFAULT_CARD_SIZE_PRESET]).widthPx;
+    const data = buildDeckViewerData(eventId, store, cardStore, cardImageWidthPx);
+    if (!data) return { ok: false, reason: `No deck/draft data captured yet for ${eventId}.` };
+
+    const html = generateDeckViewerHtml({ ...data, appVersion: app.getVersion() });
+    const outDir = join(pipeline.dataDir, "deck-viewer");
+    mkdirSync(outDir, { recursive: true });
+    const fileName = `${eventId.replace(/[^A-Za-z0-9_-]/g, "_")}.html`;
+    const outPath = join(outDir, fileName);
+    writeFileSync(outPath, html, "utf8");
+    return { ok: true, outPath, fileName };
+  }
+
   ipcMain.handle("open-deck-viewer", () => {
     const currentEventId = liveState.snapshot().eventRecord?.eventId;
     if (!currentEventId) return { ok: false, reason: "No current event to show yet." };
@@ -1054,16 +1084,9 @@ app.whenReady().then(() => {
     try {
       store = new TypedEventStore(dbPath);
       cardStore = new CardStore(dbPath);
-      const cardImageWidthPx = (CARD_SIZE_PRESETS[overlaySettings.cardSizePreset] ?? CARD_SIZE_PRESETS[DEFAULT_CARD_SIZE_PRESET]).widthPx;
-      const data = buildDeckViewerData(currentEventId, store, cardStore, cardImageWidthPx);
-      if (!data) return { ok: false, reason: `No deck/draft data captured yet for ${currentEventId}.` };
-
-      const html = generateDeckViewerHtml({ ...data, appVersion: app.getVersion() });
-      const outDir = join(pipeline.dataDir, "deck-viewer");
-      mkdirSync(outDir, { recursive: true });
-      const outPath = join(outDir, `${currentEventId.replace(/[^A-Za-z0-9_-]/g, "_")}.html`);
-      writeFileSync(outPath, html, "utf8");
-      shell.openPath(outPath);
+      const result = writeDeckViewerPage(currentEventId, store, cardStore);
+      if (!result.ok) return result;
+      shell.openPath(result.outPath);
       return { ok: true };
     } catch (err) {
       console.error("Failed to generate/open deck viewer:", err);
@@ -1073,6 +1096,72 @@ app.whenReady().then(() => {
       cardStore?.close();
     }
   });
+
+  /**
+   * Milestone 19: "I want to be able to open even previous events and decks
+   * I played" (2026-09-30) - the tray's "Past Events..." item. Generates
+   * (or refreshes) every known run's own deck-viewer page via
+   * writeDeckViewerPage above, then a plain index page (pastEventsHtml.ts)
+   * linking to each one, and opens the index. Same one-shot fresh-
+   * connection approach as open-deck-viewer.
+   *
+   * Known limitation, found while investigating the 2026-09-30 "Sealed
+   * Deck 0-0" report: Arena can reuse the exact same eventId for two
+   * genuinely different course runs (confirmed in this user's own data -
+   * a completed 4-3 Sealed run and a later, separate 0-0 run both under
+   * "Sealed_FRA_20260929", different courseId each time). Every lookup in
+   * this project (listEventRuns, buildEventRunHistory, and
+   * LiveStateTracker.courseStandings) is keyed by eventId alone, so this
+   * page's entry for such an eventId shows a blend (the latest deck
+   * submission, latest standing) rather than either run individually -
+   * not fixed here; would need courseId threaded through the whole
+   * eventHistory/liveState layer to do properly.
+   */
+  openPastEventsPage = (): void => {
+    const dbPath = join(pipeline.dataDir, "tracker.db");
+    let store: TypedEventStore | null = null;
+    let cardStore: CardStore | null = null;
+    try {
+      store = new TypedEventStore(dbPath);
+      cardStore = new CardStore(dbPath);
+      const source = loadEventHistorySource(store);
+      const knownRuns = listEventRuns(source);
+
+      const rows: PastEventRow[] = [];
+      for (const run of knownRuns) {
+        const written = writeDeckViewerPage(run.eventId, store, cardStore);
+        if (!written.ok) continue; // shouldn't happen for a listed run, but never let one bad run break the whole index
+        const history = buildEventRunHistory(run.eventId, source);
+        rows.push({
+          eventId: run.eventId,
+          identity: run.identity,
+          format: history.format,
+          deckName: history.deck?.deckName ?? null,
+          winRate: history.winRate,
+          fileName: written.fileName,
+        });
+      }
+
+      const html = generatePastEventsHtml(rows);
+      const outDir = join(pipeline.dataDir, "deck-viewer");
+      mkdirSync(outDir, { recursive: true });
+      const outPath = join(outDir, "index.html");
+      writeFileSync(outPath, html, "utf8");
+      shell.openPath(outPath);
+    } catch (err) {
+      console.error("Failed to generate/open past events page:", err);
+      try {
+        if (Notification.isSupported()) {
+          new Notification({ title: "MTGA Tracker", body: "Couldn't open Past Events - check the logs." }).show();
+        }
+      } catch {
+        // Notifications are a nice-to-have.
+      }
+    } finally {
+      store?.close();
+      cardStore?.close();
+    }
+  };
 
   // Milestone 7 phase 5: "live draft progress" page. See draftProgressHtml.ts's
   // top comment for why this is a static file that gets rewritten on every

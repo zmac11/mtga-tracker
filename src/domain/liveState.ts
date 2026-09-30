@@ -193,6 +193,9 @@ export class LiveStateTracker {
   seedHistory(events: DomainEvent[]): void {
     for (const event of events) {
       switch (event.kind) {
+        case "PlayerIdentified":
+          this.myScreenName = event.screenName;
+          break;
         case "MatchFound":
           this.matchFounds.push(event);
           break;

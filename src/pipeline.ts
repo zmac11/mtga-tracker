@@ -98,15 +98,31 @@ export class CapturePipeline extends EventEmitter {
    * for seeding a fresh LiveStateTracker's rollup history at startup (see
    * LiveStateTracker.seedHistory) - so a relaunch doesn't lose track of an
    * event's already-known record until something new happens to re-report
-   * it. Deliberately excludes GameStateSnapshot/PlayerIdentified (not
-   * needed for rollups) and doesn't attempt overall chronological ordering
-   * across kinds - seedHistory doesn't need it (see its own comment). As of
-   * milestone 7 phase 5, also includes the draft pack/pick/completion kinds
-   * so a still-in-progress draft resumes showing live progress after a
-   * relaunch too, not just match/event win-rate history.
+   * it. Deliberately excludes GameStateSnapshot (not needed for rollups)
+   * and doesn't attempt overall chronological ordering across kinds -
+   * seedHistory doesn't need it (see its own comment). As of milestone 7
+   * phase 5, also includes the draft pack/pick/completion kinds so a
+   * still-in-progress draft resumes showing live progress after a relaunch
+   * too, not just match/event win-rate history.
+   *
+   * Found 2026-09-30: PlayerIdentified WAS excluded here too (this
+   * function's comment used to say so), on the reasoning that it's "not
+   * needed for rollups" - true when this was written, false since
+   * computeMatchOutcomes (rollups.ts) started matching each MatchFound
+   * player against LiveStateTracker.myScreenName. Since seedHistory never
+   * saw a PlayerIdentified event, myScreenName stayed null after every
+   * relaunch until a fresh live one arrived (which may not happen again
+   * for the rest of an Arena client session) - and with it null, every
+   * local win/loss rollup read as 0-0 for every event, not just whichever
+   * one was actually affected by something else. Including it here and
+   * handling it in seedHistory fixes that: the store's rows are already in
+   * insertion/chronological order (sqliteStore.ts's `ORDER BY id ASC`), so
+   * replaying all of them just leaves the most recent screen name in
+   * place, exactly like the live case.
    */
   historyForSeeding(): DomainEvent[] {
     return [
+      ...this.typedStore.all("PlayerIdentified"),
       ...this.typedStore.all("MatchFound"),
       ...this.typedStore.all("MatchCompleted"),
       ...this.typedStore.all("DeckSubmitted"),
