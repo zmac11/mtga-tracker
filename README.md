@@ -216,7 +216,11 @@ window.
 
 This reads a local log file the game itself writes and never touches game
 memory, packets, or automation - the same approach 17Lands, MTGA Pro
-Tracker and other established community tools use, under Wizards' Fan
+Tracker and other established community tools use. It also reads a
+second local file, Arena's own `Raw_CardDatabase_*.mtga` (already on your
+disk), to map card IDs to names/images - read-only, and the only data it
+extracts (card names, sets, oracle text) is the same public information
+already published on Scryfall/Gatherer. Both fall under Wizards' Fan
 Content Policy. It's worth rechecking
 [Wizards' Fan Content Policy](https://company.wizards.com/en/legal/fancontentpolicy)
 yourself before distributing anything beyond personal/friends use - this
