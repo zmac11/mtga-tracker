@@ -770,6 +770,41 @@ function resolvePipelineDataDir(): string | undefined {
   return app.isPackaged ? join(app.getPath("userData"), "data") : undefined;
 }
 
+/**
+ * Milestone 19: Electron does not prevent a second copy of the app from
+ * launching on its own - nothing here ever asked it to. Confirmed as a
+ * real, already-happened problem: two running copies both tail the same
+ * Player.log and both independently receive Arena's EventGetCoursesV2
+ * responses, so both append their own copy of the same CourseStanding to
+ * the shared tracker.db - visible directly in the data as near-identical
+ * rows a few seconds apart. Two copies also fight over the same global
+ * shortcuts and tray icon. requestSingleInstanceLock() is Electron's
+ * standard fix: the second launch gets refused the lock and exits
+ * immediately (before creating any window, tray icon, or shortcut - see
+ * app.exit() below, which unlike app.quit() stops execution right here
+ * rather than continuing through the rest of this file first), and the
+ * *first* instance is told about the attempt via "second-instance" so it
+ * can bring its own window forward instead of the user wondering why
+ * nothing happened.
+ */
+if (!app.requestSingleInstanceLock()) {
+  app.exit(0);
+}
+
+app.on("second-instance", () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.show();
+    mainWindow.focus();
+  }
+  try {
+    if (Notification.isSupported()) {
+      new Notification({ title: "MTGA Tracker", body: "MTGA Tracker is already running." }).show();
+    }
+  } catch {
+    // Notifications are a nice-to-have.
+  }
+});
+
 app.whenReady().then(() => {
   // Tray-only app - no dock icon, no window menu. All settings/quit live in
   // the tray's context menu (built below), plus the small Settings window
