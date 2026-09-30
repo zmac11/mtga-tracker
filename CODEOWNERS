@@ -1,0 +1,10 @@
+# Code owners for mtga-tracker.
+#
+# Every file in the repo (the "*" pattern) is owned by @zmac11. Combined
+# with the "master" branch protection rule (require a pull request before
+# merging + require review from Code Owners), this means: anyone else's
+# pull request needs @zmac11's approval before it can be merged, and no
+# one but @zmac11 can push directly to master.
+#
+# See https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+* @zmac11
