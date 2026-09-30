@@ -50,8 +50,33 @@ export interface LimitedStatsRow {
   splashColors: ColorLetter[];
   wins: number;
   losses: number;
-  /** This run's own maindeck (cardId+quantity), or empty if no deck was captured - see this interface's header comment for why it's carried here. */
+  /** This run's own (latest) maindeck (cardId+quantity), or empty if no deck was captured - see this interface's header comment for why it's carried here. */
   mainDeck: Array<{ cardId: number; quantity: number }>;
+  /**
+   * Milestone 20 follow-up (2026-09-30): "For limited events track winrates
+   * even for single cards in maindeck" - one entry per PLAYED deck
+   * configuration for this run (deckVersions.ts's DeckVersion, not just the
+   * final mainDeck above), each with its own maindeck and the local
+   * win/loss record earned while that exact configuration was in use. This
+   * is the granularity a per-card win rate needs (a card that was only in
+   * an early, poorly-performing version of the deck shouldn't be blamed
+   * for games played after it got cut) - the flat `wins`/`losses` above
+   * are the run's OVERALL, CourseStanding-reconciled total and deliberately
+   * NOT the same thing (deckVersions.ts's own winRate is local-only, never
+   * reconciled - see that file's header), so the two can disagree slightly
+   * and that's expected, not a bug. Empty when no deck version was ever
+   * actually played (see DeckVersion's own doc comment) - a real, if rare,
+   * gap: such a run's cards simply don't contribute to the per-card
+   * breakdown at all.
+   */
+  deckVersions: Array<{ mainDeck: Array<{ cardId: number; quantity: number }>; wins: number; losses: number }>;
+}
+
+/** A card's basic display info, keyed by cardId - the small subset statsHtml.ts's per-card table needs, not a full EnrichedCard. */
+export interface StatsCardInfo {
+  cardId: number;
+  name: string;
+  colors: string[];
 }
 
 /**
@@ -83,9 +108,27 @@ export function buildLimitedStatsRows(source: EventHistorySource, cardColors: Ma
       wins: history.winRate.wins,
       losses: history.winRate.losses,
       mainDeck,
+      deckVersions: history.deckVersions.map((v) => ({ mainDeck: v.mainDeck, wins: v.winRate.wins, losses: v.winRate.losses })),
     });
   }
   return rows;
+}
+
+/**
+ * The small, JSON-embeddable card catalog statsHtml.ts's per-card table
+ * needs (name/colors only) - built here rather than embedding a full
+ * EnrichedCard per card, and scoped to only the cardIds that actually
+ * appear in some row's deckVersions (not the whole card database), to keep
+ * the generated page's embedded payload small - same convention as
+ * deckViewerLoader.ts's own per-page card lookups.
+ */
+export function buildStatsCardCatalog(rows: LimitedStatsRow[], cardsById: Map<number, { name: string; colors: string[] }>): StatsCardInfo[] {
+  const ids = new Set<number>();
+  for (const r of rows) for (const v of r.deckVersions) for (const e of v.mainDeck) ids.add(e.cardId);
+  return [...ids].map((cardId) => {
+    const c = cardsById.get(cardId);
+    return { cardId, name: c?.name ?? `Unknown card #${cardId} (run npm run refresh-cards)`, colors: c?.colors ?? [] };
+  });
 }
 
 /** Plain wins/losses -> WinRate, same convention as rollups.ts's winRateFromCounts - kept local rather than importing that one function just for this, since statsHtml.ts's client-side JS needs the identical pct-rounding rule re-implemented in JS anyway (see that file). */

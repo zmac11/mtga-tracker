@@ -18,7 +18,7 @@ import { generateDraftProgressHtml, generateNoDraftInProgressHtml } from "../dra
 import { loadEventHistorySource } from "../eventHistoryLoader.js";
 import { listEventRuns, buildEventRunHistory } from "../domain/eventHistory.js";
 import { generatePastEventsHtml, type PastEventRow } from "../pastEventsHtml.js";
-import { buildLimitedStatsRows } from "../domain/statsRollup.js";
+import { buildLimitedStatsRows, buildStatsCardCatalog } from "../domain/statsRollup.js";
 import { generateStatsHtml } from "../statsHtml.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -1201,10 +1201,15 @@ app.whenReady().then(() => {
       cardStore = new CardStore(dbPath);
       const source = loadEventHistorySource(store);
       const cardColors = new Map<number, string[]>();
-      for (const c of cardStore.all()) cardColors.set(c.grpId, c.colors);
+      const cardsById = new Map<number, { name: string; colors: string[] }>();
+      for (const c of cardStore.all()) {
+        cardColors.set(c.grpId, c.colors);
+        cardsById.set(c.grpId, { name: c.name, colors: c.colors });
+      }
       const rows = buildLimitedStatsRows(source, cardColors);
+      const cardCatalog = buildStatsCardCatalog(rows, cardsById);
 
-      const html = generateStatsHtml(rows);
+      const html = generateStatsHtml(rows, cardCatalog);
       const outDir = join(pipeline.dataDir, "stats");
       mkdirSync(outDir, { recursive: true });
       const outPath = join(outDir, "limited-stats.html");

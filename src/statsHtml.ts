@@ -1,4 +1,4 @@
-import type { LimitedStatsRow } from "./domain/statsRollup.js";
+import type { LimitedStatsRow, StatsCardInfo } from "./domain/statsRollup.js";
 
 /**
  * Milestone 20 (2026-09-30): "Add some kind of filter for event types and
@@ -17,9 +17,28 @@ import type { LimitedStatsRow } from "./domain/statsRollup.js";
  * and the full row list is already small (one row per event run, not per
  * match) and has no sensitive data beyond what pastEventsHtml.ts already
  * shows unfiltered on the same machine.
+ *
+ * Milestone 20 follow-up (2026-09-30): "For limited events track winrates
+ * even for single cards in maindeck" - the per-card table below is
+ * deliberately derived from whichever runs pass the SAME filters above
+ * (event type/set/color), not a separate, unfiltered card view, so e.g.
+ * "how do my BR decks' cards perform" is just applying the color filter,
+ * with no second page or query needed. Built from each row's deckVersions
+ * (statsRollup.ts) rather than its single current mainDeck, so a card only
+ * played in an earlier, later-cut version of a deck is credited/blamed for
+ * that version's own record, not the run's whole history - and note that
+ * this means the per-card totals are LOCAL-ONLY (deckVersions.ts's winRate
+ * is never reconciled against CourseStanding), so they can differ slightly
+ * from the run-level Win% column above, which is reconciled - both numbers
+ * are correct for what they measure, they're just not the same measure.
+ * `cardCatalog` supplies name/colors for whichever cardIds actually appear
+ * in some row's deckVersions (see buildStatsCardCatalog) - kept as its own
+ * small embedded array rather than looking cards up some other way, so
+ * this page stays fully self-contained/offline like every other page here.
  */
-export function generateStatsHtml(rows: LimitedStatsRow[]): string {
+export function generateStatsHtml(rows: LimitedStatsRow[], cardCatalog: StatsCardInfo[]): string {
   const dataJson = JSON.stringify(rows).replace(/</g, "\\u003c");
+  const cardCatalogJson = JSON.stringify(cardCatalog).replace(/</g, "\\u003c");
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -51,6 +70,10 @@ export function generateStatsHtml(rows: LimitedStatsRow[]): string {
   .record-win { color: #7ee787; }
   .record-loss { color: #ff8080; }
   .empty-note { padding: 20px 0; }
+  h2 { font-size: 1.1rem; margin: 32px 0 4px; }
+  .card-controls { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .card-controls input[type="number"] { width: 50px; background: #14151a; color: #e8e8ec; border: 1px solid #2a2c36; border-radius: 6px; padding: 5px 6px; }
+  .color-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 3px; }
 </style>
 </head>
 <body>
@@ -83,9 +106,26 @@ export function generateStatsHtml(rows: LimitedStatsRow[]): string {
   </table>
   <p class="empty-note muted" id="empty-note" style="display:none;">No runs match this filter combination.</p>
 
+  <h2>Card win rates</h2>
+  <p class="hint muted">Win rate while each card was in the maindeck, for the runs matching the filters above. Local-only record (see note in source) - small sample sizes are noisy, hence the minimum below.</p>
+  <div class="card-controls">
+    <label class="group-label" for="min-decks">Min decks played</label>
+    <input type="number" id="min-decks" min="1" value="2">
+  </div>
+  <table>
+    <thead>
+      <tr><th>Card</th><th>Colors</th><th>Decks played</th><th>Record</th><th>Win%</th></tr>
+    </thead>
+    <tbody id="card-rows-body"></tbody>
+  </table>
+  <p class="empty-note muted" id="card-empty-note" style="display:none;">No cards meet the minimum deck count for this filter combination.</p>
+
   <script id="stats-data" type="application/json">${dataJson}</script>
+  <script id="card-catalog-data" type="application/json">${cardCatalogJson}</script>
   <script>
     const rows = JSON.parse(document.getElementById("stats-data").textContent);
+    const cardCatalog = JSON.parse(document.getElementById("card-catalog-data").textContent);
+    const cardById = new Map(cardCatalog.map((c) => [c.cardId, c]));
     const activeColors = new Set();
 
     function uniqueSorted(values) {
@@ -150,6 +190,54 @@ export function generateStatsHtml(rows: LimitedStatsRow[]): string {
         body.appendChild(tr);
       }
       document.getElementById("empty-note").style.display = filtered.length === 0 ? "block" : "none";
+
+      renderCardStats(filtered);
+    }
+
+    function renderCardStats(filteredRuns) {
+      const minDecks = Math.max(1, parseInt(document.getElementById("min-decks").value, 10) || 1);
+
+      const perCard = new Map(); // cardId -> { wins, losses, decksPlayedIn }
+      for (const run of filteredRuns) {
+        for (const version of run.deckVersions) {
+          for (const entry of version.mainDeck) {
+            const existing = perCard.get(entry.cardId) ?? { wins: 0, losses: 0, decksPlayedIn: 0 };
+            existing.wins += version.wins;
+            existing.losses += version.losses;
+            existing.decksPlayedIn += 1;
+            perCard.set(entry.cardId, existing);
+          }
+        }
+      }
+
+      const cardRows = [...perCard.entries()]
+        .map(([cardId, stat]) => ({ cardId, ...stat }))
+        .filter((c) => c.decksPlayedIn >= minDecks)
+        .sort((a, b) => b.decksPlayedIn - a.decksPlayedIn || (b.wins + b.losses === 0 ? 0 : b.wins / (b.wins + b.losses)) - (a.wins + a.losses === 0 ? 0 : a.wins / (a.wins + a.losses)));
+
+      const body = document.getElementById("card-rows-body");
+      body.innerHTML = "";
+      for (const c of cardRows) {
+        const info = cardById.get(c.cardId);
+        const name = info ? info.name : "Unknown card #" + c.cardId;
+        const colors = info ? info.colors : [];
+        const total = c.wins + c.losses;
+        const pct = total > 0 ? Math.round((c.wins / total) * 100) + "%" : "-";
+        const dots = colors.map((col) => '<span class="color-dot" style="background:' + colorHex(col) + ';"></span>').join("");
+        const tr = document.createElement("tr");
+        tr.innerHTML =
+          "<td>" + escapeText(name) + "</td>" +
+          "<td>" + (dots || "-") + "</td>" +
+          "<td>" + c.decksPlayedIn + "</td>" +
+          '<td><span class="record-win">' + c.wins + '</span>-<span class="record-loss">' + c.losses + "</span></td>" +
+          "<td>" + pct + "</td>";
+        body.appendChild(tr);
+      }
+      document.getElementById("card-empty-note").style.display = cardRows.length === 0 ? "block" : "none";
+    }
+
+    function colorHex(letter) {
+      return { W: "#f8f6d8", U: "#0e68ab", B: "#4a4a4a", R: "#d3202a", G: "#00733e" }[letter] || "#8a8d99";
     }
 
     function buildColorChips() {
@@ -175,6 +263,7 @@ export function generateStatsHtml(rows: LimitedStatsRow[]): string {
 
     document.getElementById("filter-subtype").addEventListener("change", render);
     document.getElementById("filter-set").addEventListener("change", render);
+    document.getElementById("min-decks").addEventListener("input", render);
     document.getElementById("reset-filters").addEventListener("click", () => {
       document.getElementById("filter-subtype").value = "";
       document.getElementById("filter-set").value = "";
