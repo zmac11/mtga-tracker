@@ -128,6 +128,8 @@ export interface DeckViewerData {
   entry?: { currencyType: string; amountPaid: number } | null;
   /** Milestone 17: this run's prize claim, if captured - see EventReward in types.ts for which sub-fields are confirmed vs. best-effort. */
   reward?: DeckViewerReward | null;
+  /** Milestone 19: the app version that generated this page, shown in a small footer - so a page saved/screenshotted from an older run is identifiable later. Optional (omitted entirely rather than shown blank) for older callers/tests that don't pass it. */
+  appVersion?: string;
 }
 
 /** Milestone 17: one played deck version, already resolved to full ViewerCards (same shape the "Deck list"/"Visual"/"Curve" tabs use) for the "Versions" tab to render with the existing deckListHtml. */
@@ -547,6 +549,7 @@ export function generateDeckViewerHtml(data: DeckViewerData): string {
   .versions-list { display: flex; flex-direction: column; gap: 28px; }
   .version-block { border-bottom: 1px solid #2a2c36; padding-bottom: 20px; }
   .version-block:last-child { border-bottom: none; padding-bottom: 0; }
+  .app-version-footer { margin-top: 28px; padding-top: 12px; border-top: 1px solid #2a2c36; color: #6a6d79; font-size: 0.75rem; }
 </style>
 </head>
 <body>
@@ -594,6 +597,8 @@ export function generateDeckViewerHtml(data: DeckViewerData): string {
   </div>`
       : ""
   }
+
+  ${data.appVersion ? `<div class="app-version-footer">MTGA Tracker v${escapeHtml(data.appVersion)}</div>` : ""}
 
   <script>
     ${CARD_PREVIEW_JS}

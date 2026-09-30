@@ -15,6 +15,7 @@ const statusEl = document.getElementById("status");
 const autoUpdateCheckbox = document.getElementById("auto-update-checkbox");
 const checkUpdatesBtn = document.getElementById("check-updates-btn");
 const updateStatusEl = document.getElementById("update-status");
+const appVersionLineEl = document.getElementById("app-version-line");
 // Milestone 18: the "Locations" section.
 const logPathStatusEl = document.getElementById("log-path-status");
 const chooseLogPathBtn = document.getElementById("choose-log-path-btn");
@@ -216,6 +217,10 @@ async function init() {
   setOpacitySlider(settings.opacity);
   autoUpdateCheckbox.checked = settings.autoCheckForUpdates !== false;
   updateStatusEl.textContent = settings.appVersion ? `Current version: v${settings.appVersion}` : "";
+  // Milestone 19: a separate, never-overwritten line - updateStatusEl above
+  // gets replaced by checkForUpdates results (see the click handler further
+  // up), which was silently hiding the version again after any check.
+  appVersionLineEl.textContent = settings.appVersion ? `MTGA Tracker v${settings.appVersion}` : "";
   renderLocations(settings);
 }
 

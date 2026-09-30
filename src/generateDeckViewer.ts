@@ -1,6 +1,6 @@
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { TypedEventStore } from "./db/sqliteStore.js";
 import { CardStore } from "./cards/cardStore.js";
@@ -53,7 +53,8 @@ function main() {
     return;
   }
 
-  const html = generateDeckViewerHtml(data);
+  const pkg = JSON.parse(readFileSync(join(__dirname, "..", "package.json"), "utf8")) as { version?: string };
+  const html = generateDeckViewerHtml({ ...data, appVersion: pkg.version });
   const outDir = join(dataDir, "deck-viewer");
   mkdirSync(outDir, { recursive: true });
   const safeName = eventId.replace(/[^A-Za-z0-9_-]/g, "_");

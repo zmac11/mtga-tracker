@@ -994,7 +994,7 @@ app.whenReady().then(() => {
       const data = buildDeckViewerData(currentEventId, store, cardStore, cardImageWidthPx);
       if (!data) return { ok: false, reason: `No deck/draft data captured yet for ${currentEventId}.` };
 
-      const html = generateDeckViewerHtml(data);
+      const html = generateDeckViewerHtml({ ...data, appVersion: app.getVersion() });
       const outDir = join(pipeline.dataDir, "deck-viewer");
       mkdirSync(outDir, { recursive: true });
       const outPath = join(outDir, `${currentEventId.replace(/[^A-Za-z0-9_-]/g, "_")}.html`);
