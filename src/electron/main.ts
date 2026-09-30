@@ -718,6 +718,29 @@ function createTray(): Tray {
   return t;
 }
 
+/**
+ * Milestone 19: CapturePipeline defaults its dataDir to <project root>/data
+ * (see pipeline.ts) - correct for the CLI and for `npm run overlay` in dev,
+ * where "project root" is a real, writable folder on disk. For a packaged
+ * build, though, __dirname resolves to somewhere inside app.asar, which is
+ * a single read-only archive file, not a real directory - confirmed by
+ * directly attempting a write there (ENOTDIR). Left unfixed, every
+ * packaged install would silently fail to persist tracker.db, the
+ * cards-cache, deck-viewer output, and draft-progress output - a real
+ * install has never actually been exercised against real gameplay before
+ * this was caught, only launched and clicked through.
+ *
+ * Fix: when packaged, explicitly point dataDir at a "data" subfolder under
+ * Electron's own userData directory (a real, writable, per-user location
+ * electron-builder never touches) instead of the CapturePipeline default.
+ * Left undefined in dev so `npm run overlay` keeps using the existing
+ * project-root data/ folder unchanged (no migration needed for data you
+ * already have there).
+ */
+function resolvePipelineDataDir(): string | undefined {
+  return app.isPackaged ? join(app.getPath("userData"), "data") : undefined;
+}
+
 app.whenReady().then(() => {
   // Tray-only app - no dock icon, no window menu. All settings/quit live in
   // the tray's context menu (built below), plus the small Settings window
@@ -730,7 +753,7 @@ app.whenReady().then(() => {
 
   const { logPath: argvLogPath, fromStart } = parseArgs(process.argv.slice(2));
   const logPath = argvLogPath ?? overlaySettings.customLogPath ?? undefined;
-  const pipeline = new CapturePipeline({ logPath, fromStart });
+  const pipeline = new CapturePipeline({ logPath, fromStart, dataDir: resolvePipelineDataDir() });
   const liveState = new LiveStateTracker();
   // Rebuild win-rate/event-record history from previous runs before we ever
   // show anything - otherwise a relaunch shows every event's record as blank
