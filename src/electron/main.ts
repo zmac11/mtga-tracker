@@ -18,6 +18,8 @@ import { generateDraftProgressHtml, generateNoDraftInProgressHtml } from "../dra
 import { loadEventHistorySource } from "../eventHistoryLoader.js";
 import { listEventRuns, buildEventRunHistory } from "../domain/eventHistory.js";
 import { generatePastEventsHtml, type PastEventRow } from "../pastEventsHtml.js";
+import { buildLimitedStatsRows } from "../domain/statsRollup.js";
+import { generateStatsHtml } from "../statsHtml.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -328,6 +330,10 @@ let runCardRefresh: ((skipEnrich: boolean) => void) | null = null;
 // top-level function, so it reaches this via the slot rather than a direct
 // reference.
 let openPastEventsPage: (() => void) | null = null;
+// Milestone 20: same module-level slot pattern as openPastEventsPage above -
+// openLimitedStatsPage is defined inside app.whenReady() (needs pipeline),
+// but rebuildTrayMenu() is a top-level function.
+let openLimitedStatsPage: (() => void) | null = null;
 
 /**
  * Milestone 15: remembers the outcome of the last version check across
@@ -709,6 +715,7 @@ function rebuildTrayMenu(): void {
     },
     { label: "Overlay Settings... (size, transparency, card size)", click: openSettingsWindow },
     { label: "Past Events...", click: () => openPastEventsPage?.() },
+    { label: "Limited Stats...", click: () => openLimitedStatsPage?.() },
     { type: "separator" },
     { label: formatLastCardRefreshLabel(cardRefreshStatus), enabled: false },
     {
@@ -1163,6 +1170,51 @@ app.whenReady().then(() => {
       try {
         if (Notification.isSupported()) {
           new Notification({ title: "MTGA Tracker", body: "Couldn't open Past Events - check the logs." }).show();
+        }
+      } catch {
+        // Notifications are a nice-to-have.
+      }
+    } finally {
+      store?.close();
+      cardStore?.close();
+    }
+  };
+
+  /**
+   * Milestone 20 (2026-09-30): "Add some kind of filter for event types and
+   * set for limited formats. Also add deck color filter. Show winrates for
+   * such specific filter." - the tray's "Limited Stats..." item. Builds
+   * one LimitedStatsRow per limited (Draft/Sealed) event run (see
+   * domain/statsRollup.ts - reuses the same listEventRuns/
+   * buildEventRunHistory this file's openPastEventsPage already calls, so
+   * a courseId-collided eventId is already split into its own row here
+   * too) and renders them into one static page whose filter UI is entirely
+   * client-side JS (see statsHtml.ts) - no new IPC surface, no
+   * re-generation needed to try a different filter.
+   */
+  openLimitedStatsPage = (): void => {
+    const dbPath = join(pipeline.dataDir, "tracker.db");
+    let store: TypedEventStore | null = null;
+    let cardStore: CardStore | null = null;
+    try {
+      store = new TypedEventStore(dbPath);
+      cardStore = new CardStore(dbPath);
+      const source = loadEventHistorySource(store);
+      const cardColors = new Map<number, string[]>();
+      for (const c of cardStore.all()) cardColors.set(c.grpId, c.colors);
+      const rows = buildLimitedStatsRows(source, cardColors);
+
+      const html = generateStatsHtml(rows);
+      const outDir = join(pipeline.dataDir, "stats");
+      mkdirSync(outDir, { recursive: true });
+      const outPath = join(outDir, "limited-stats.html");
+      writeFileSync(outPath, html, "utf8");
+      shell.openPath(outPath);
+    } catch (err) {
+      console.error("Failed to generate/open limited stats page:", err);
+      try {
+        if (Notification.isSupported()) {
+          new Notification({ title: "MTGA Tracker", body: "Couldn't open Limited Stats - check the logs." }).show();
         }
       } catch {
         // Notifications are a nice-to-have.
