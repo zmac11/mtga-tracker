@@ -70,6 +70,20 @@ export interface LimitedStatsRow {
    * breakdown at all.
    */
   deckVersions: Array<{ mainDeck: Array<{ cardId: number; quantity: number }>; wins: number; losses: number }>;
+  /**
+   * Milestone 20 follow-up (2026-09-30): "I want to be able to open decks
+   * from limited filter" - the relative filename of this run's own
+   * deck-viewer page (written into the sibling `deck-viewer/` directory by
+   * electron/main.ts's shared `writeDeckViewerPage`, the exact same helper
+   * openPastEventsPage already uses), so statsHtml.ts can link straight to
+   * it. Always null coming out of `buildLimitedStatsRows` below - this is
+   * a pure, file-I/O-free domain function (see this file's header comment
+   * on that split) and has no store/pipeline.dataDir to write a page to.
+   * electron/main.ts's `openLimitedStatsPage` fills this in afterward, one
+   * row at a time, exactly the way it already attaches `fileName` to each
+   * `PastEventRow` in the sibling "Past Events" page.
+   */
+  deckViewerFileName: string | null;
 }
 
 /** A card's basic display info, keyed by cardId - the small subset statsHtml.ts's per-card table needs, not a full EnrichedCard. */
@@ -109,6 +123,7 @@ export function buildLimitedStatsRows(source: EventHistorySource, cardColors: Ma
       losses: history.winRate.losses,
       mainDeck,
       deckVersions: history.deckVersions.map((v) => ({ mainDeck: v.mainDeck, wins: v.winRate.wins, losses: v.winRate.losses })),
+      deckViewerFileName: null,
     });
   }
   return rows;

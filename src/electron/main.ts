@@ -1253,9 +1253,21 @@ app.whenReady().then(() => {
         cardsById.set(c.grpId, { name: c.name, colors: c.colors });
       }
       const rows = buildLimitedStatsRows(source, cardColors);
-      const cardCatalog = buildStatsCardCatalog(rows, cardsById);
+      // Milestone 20 follow-up: "I want to be able to open decks from
+      // limited filter" - write (or refresh) each row's own deck-viewer
+      // page via the same shared writeDeckViewerPage helper
+      // openPastEventsPage already uses, and attach its filename so
+      // statsHtml.ts can link straight to it. A row whose write fails
+      // (shouldn't happen for a listed run, but never let one bad run
+      // break the whole page) just keeps its default null - statsHtml.ts
+      // already renders the deck name as plain text in that case.
+      const linkedRows = rows.map((row) => {
+        const written = writeDeckViewerPage(row.eventId, store!, cardStore!, row.courseId);
+        return { ...row, deckViewerFileName: written.ok ? written.fileName : null };
+      });
+      const cardCatalog = buildStatsCardCatalog(linkedRows, cardsById);
 
-      const html = generateStatsHtml(rows, cardCatalog);
+      const html = generateStatsHtml(linkedRows, cardCatalog);
       const outDir = join(pipeline.dataDir, "stats");
       mkdirSync(outDir, { recursive: true });
       const outPath = join(outDir, "limited-stats.html");

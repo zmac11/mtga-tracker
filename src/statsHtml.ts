@@ -70,6 +70,8 @@ export function generateStatsHtml(rows: LimitedStatsRow[], cardCatalog: StatsCar
   .record-win { color: #7ee787; }
   .record-loss { color: #ff8080; }
   .empty-note { padding: 20px 0; }
+  td a { color: #9fa6ff; text-decoration: none; }
+  td a:hover { text-decoration: underline; }
   h2 { font-size: 1.1rem; margin: 32px 0 4px; }
   .card-controls { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
   .card-controls input[type="number"] { width: 50px; background: #14151a; color: #e8e8ec; border: 1px solid #2a2c36; border-radius: 6px; padding: 5px 6px; }
@@ -183,7 +185,7 @@ export function generateStatsHtml(rows: LimitedStatsRow[], cardCatalog: StatsCar
         tr.innerHTML =
           "<td>" + escapeText(r.subtype) + "</td>" +
           "<td>" + escapeText(r.setCode || "-") + "</td>" +
-          "<td>" + escapeText(r.deckName || "(no deck captured)") + "</td>" +
+          "<td>" + (r.deckViewerFileName ? '<a href="../deck-viewer/' + encodeURIComponent(r.deckViewerFileName) + '">' + escapeText(r.deckName || "(no deck captured)") + "</a>" : escapeText(r.deckName || "(no deck captured)")) + "</td>" +
           "<td>" + escapeText(r.colorCombo) + "</td>" +
           '<td><span class="record-win">' + r.wins + '</span>-<span class="record-loss">' + r.losses + "</span></td>" +
           "<td>" + pct + "</td>";
