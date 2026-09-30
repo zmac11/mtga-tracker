@@ -19,6 +19,31 @@ import { generateDraftProgressHtml, generateNoDraftInProgressHtml } from "../dra
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /**
+ * Milestone 19: an uncaught exception in the main process previously just
+ * crashed the whole app - silently, with nothing to see unless you happened
+ * to be watching a terminal. Confirmed as the real cause of a mid-event
+ * crash (toggleInteractive() below, called via its global shortcut, after
+ * mainWindow had already been destroyed - see that function's updated
+ * isDestroyed() guard). This is a last-resort net, not a fix for any
+ * specific bug: log it, tell the user via a notification instead of just
+ * vanishing, and keep running - losing the overlay for one bad interaction
+ * beats losing the rest of the event's tracking along with it.
+ */
+process.on("uncaughtException", (err) => {
+  console.error("Uncaught exception (main process kept running):", err);
+  try {
+    if (Notification.isSupported()) {
+      new Notification({
+        title: "MTGA Tracker hit an error",
+        body: "Something went wrong, but the tracker is still running. Check the tray menu if the overlay looks off.",
+      }).show();
+    }
+  } catch {
+    // Notifications are a nice-to-have - never let this handler itself throw.
+  }
+});
+
+/**
  * Milestone 3: the overlay. Reuses the exact same capture pipeline as the
  * headless CLI (pipeline.ts) so there's only one implementation of "find
  * Player.log, tail it, parse it, classify it, store it" - this file's job
@@ -535,6 +560,10 @@ function createWindow(settings: OverlaySettings): BrowserWindow {
     savePosition(wx, wy);
   });
 
+  win.on("closed", () => {
+    mainWindow = null;
+  });
+
   win.loadFile(join(__dirname, "renderer", "overlay.html"));
   return win;
 }
@@ -555,7 +584,7 @@ function applyOverlaySettings(settings: OverlaySettings): void {
   overlaySettings = settings;
   saveOverlaySettings(settings);
   const preset = SIZE_PRESETS[settings.sizePreset] ?? SIZE_PRESETS[DEFAULT_SIZE_PRESET];
-  if (mainWindow) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
     const [x, y] = mainWindow.getPosition();
     mainWindow.setBounds({ x, y, width: preset.width, height: preset.height });
     mainWindow.webContents.send("settings", { fontSizePx: BASE_FONT_PX * preset.scale, opacity: settings.opacity });
@@ -563,7 +592,7 @@ function applyOverlaySettings(settings: OverlaySettings): void {
 }
 
 function toggleInteractive(): void {
-  if (!mainWindow) return;
+  if (!mainWindow || mainWindow.isDestroyed()) return;
   interactive = !interactive;
   mainWindow.setIgnoreMouseEvents(!interactive, { forward: true });
   mainWindow.webContents.send("interactive-changed", interactive);
@@ -580,7 +609,7 @@ function toggleInteractive(): void {
  * just makes the exact same window reappear where it was.
  */
 function toggleOverlayHidden(): void {
-  if (!mainWindow) return;
+  if (!mainWindow || mainWindow.isDestroyed()) return;
   overlayHidden = !overlayHidden;
   if (overlayHidden) {
     mainWindow.hide();
@@ -1046,7 +1075,8 @@ app.whenReady().then(() => {
   });
 
   const sendSnapshot = () => {
-    mainWindow?.webContents.send("state", {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    mainWindow.webContents.send("state", {
       foundLog: pipeline.located.found,
       watchingPath: pipeline.located.path,
       snapshot: liveState.snapshot(),
