@@ -63,6 +63,29 @@ function run() {
   assert.equal(snap.match?.activeSeat, 2);
   assert.equal(snap.match?.currentGameNumber, 1); // milestone 18 (Bo3 readiness): from the GameStateSnapshot just recorded
 
+  // Real live play (2026-09-30, first real Sealed match): a later
+  // GameStateSnapshot can be a partial GRE diff carrying no player data at
+  // all (confirmed real - plenty of captured snapshots have `players: []`
+  // because they only touched turn/stage, not life totals) - this used to
+  // blank the overlay's HP display outright by wholesale-replacing the last
+  // known good snapshot. It should instead keep the last known life totals
+  // while still picking up whatever *did* change (turnActivePlayer here).
+  t.record({
+    kind: "GameStateSnapshot",
+    matchId: "m1",
+    gameNumber: 1,
+    stage: null,
+    turnActivePlayer: 1,
+    turnDecisionPlayer: 1,
+    players: [],
+    ts: "t3b",
+  });
+  snap = t.snapshot();
+  assert.equal(snap.match?.me?.life, 15); // preserved, not blanked
+  assert.equal(snap.match?.opponent?.life, 18); // preserved, not blanked
+  assert.equal(snap.match?.activeSeat, 1); // still picks up the real change
+  assert.equal(snap.match?.currentGameNumber, 1); // preserved (event.gameNumber was also set here, but stage/turn null-fallback is the point)
+
   t.record({
     kind: "MatchCompleted",
     matchId: "m1",

@@ -177,7 +177,33 @@ export class LiveStateTracker {
         break;
       case "GameStateSnapshot":
         if (event.matchId) {
-          this.latestGameStateByMatch.set(event.matchId, event);
+          // Real live play (2026-09-30, first real Sealed match): the overlay's
+          // HP/turn display went blank mid-match. Root cause - this used to be
+          // a blind `.set(matchId, event)`, replacing the whole cached
+          // snapshot on every single GameStateSnapshot, even ones that are a
+          // GRE UI-only/partial diff carrying no player data at all (confirmed
+          // real: plenty of captured snapshots have `players: []` because
+          // they only touched stage/turn, not life totals). A later
+          // players-empty diff would wipe out the last *good* life totals the
+          // overlay had just shown, blanking HP until the next diff happened
+          // to include player data again. Fixed by merging into whatever was
+          // last known for this match, keeping each field's last non-empty
+          // value instead of trusting every diff to be a full snapshot - the
+          // same "don't discard real data for a partial update" principle
+          // already applied elsewhere in this project (CourseStanding
+          // history, DeckSubmitted's real-sideboard precedence, etc.).
+          const previous = this.latestGameStateByMatch.get(event.matchId);
+          const merged: GameStateSnapshot = previous
+            ? {
+                ...event,
+                players: event.players.length > 0 ? event.players : previous.players,
+                stage: event.stage ?? previous.stage,
+                turnActivePlayer: event.turnActivePlayer ?? previous.turnActivePlayer,
+                turnDecisionPlayer: event.turnDecisionPlayer ?? previous.turnDecisionPlayer,
+                gameNumber: event.gameNumber ?? previous.gameNumber,
+              }
+            : event;
+          this.latestGameStateByMatch.set(event.matchId, merged);
           this.currentMatchId = event.matchId;
         }
         break;
