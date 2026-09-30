@@ -378,7 +378,10 @@ function run() {
       },
     },
   });
-  assert.equal(claim.length, 2);
+  // Milestone 21: this same Changes[] entry is ALSO captured generically as
+  // a RewardGrant now (intentional duplication - see RewardGrant's doc
+  // comment in types.ts), so the claim now has 3 events, not 2.
+  assert.equal(claim.length, 3);
   const rewardEvent = claim.find((e) => e.kind === "EventReward") as any;
   assert.equal(rewardEvent.eventId, "QuickDraft_HOB_20260915");
   assert.equal(rewardEvent.courseId, "50782680-58e3-44cb-9cba-11aef1e51b24");
@@ -388,6 +391,11 @@ function run() {
   assert.equal(rewardEvent.grantedCardCount, 0);
   const claimCardPool = claim.find((e) => e.kind === "EventCardPool") as any;
   assert.deepEqual(claimCardPool.cardPool, [100, 100, 200]);
+  const claimGrant = claim.find((e) => e.kind === "RewardGrant") as any;
+  assert.equal(claimGrant.source, "EventReward");
+  assert.equal(claimGrant.sourceId, "50782680-58e3-44cb-9cba-11aef1e51b24");
+  assert.equal(claimGrant.gems, 650);
+  assert.deepEqual(claimGrant.boosters, [{ setCode: "HOB", count: 2 }]);
 
   // A Changes entry from a DIFFERENT course (e.g. a stale/unrelated delta in
   // the same response) must not be picked up - SourceId has to match this
@@ -402,9 +410,89 @@ function run() {
       InventoryInfo: { Changes: [{ Source: "EventReward", SourceId: "not-aaa", InventoryGems: 100 }] },
     },
   });
-  assert.equal(noMatch.length, 0);
+  // EventReward correctly rejects the mismatched SourceId, but RewardGrant
+  // is deliberately NOT event/course-scoped (see its doc comment) - so it
+  // still captures this Changes[] entry generically.
+  assert.equal(noMatch.length, 1);
+  assert.equal(noMatch.find((e) => e.kind === "EventReward"), undefined);
+  const noMatchGrant = noMatch[0] as any;
+  assert.equal(noMatchGrant.kind, "RewardGrant");
+  assert.equal(noMatchGrant.source, "EventReward");
+  assert.equal(noMatchGrant.sourceId, "not-aaa");
+  assert.equal(noMatchGrant.gems, 100);
 
-  console.log("OK: classifier handled draft pack/pick/complete, match found/completed, game-state noise filtering, Bot Draft's combined pick+next-pack response, deck submission's real sideboard/format capture, EventGetCoursesV2 standings plus the generic EventCardPool capture from a course's CardPool, a synthetic 'Pick Two' (2 cards per pick) extension of both draft paths, and EventClaimPrize's real captured reward shape (including its own CardPool capture and rejecting a SourceId that doesn't match the course).");
+  // Milestone 21 - RewardGrant's three other confirmed real sources, each
+  // a trimmed-but-real payload captured 2026-09-30 from the user's own
+  // log (fields classifyRewardGrants doesn't read are omitted here, same
+  // convention as the EventClaimPrize fixture above).
+
+  // CampaignGraphTieredRewardNode via GraphProcessV2 - a Mastery Pass tier
+  // reward (BattlePass_FRA's first level). This is what "quests etc." maps
+  // to in current Arena - there is no separate traditional quest reward
+  // source left in the real data.
+  const c8 = new Classifier();
+  const tierReward = c8.classify({
+    direction: "response",
+    method: "GraphProcessV2",
+    ts: "p6",
+    json: {
+      InventoryInfo: {
+        Changes: [
+          {
+            Source: "CampaignGraphTieredRewardNode",
+            SourceId: "BattlePass_FRA.LevelTrack_Level_1_Reward",
+            Boosters: [{ CollationId: 100063, SetCode: "FRA", Count: 1 }],
+            GrantedCards: [],
+          },
+        ],
+      },
+    },
+  });
+  assert.equal(tierReward.length, 1);
+  assert.equal(tierReward[0].kind, "RewardGrant");
+  assert.equal((tierReward[0] as any).source, "CampaignGraphTieredRewardNode");
+  assert.equal((tierReward[0] as any).sourceId, "BattlePass_FRA.LevelTrack_Level_1_Reward");
+  assert.deepEqual((tierReward[0] as any).boosters, [{ setCode: "FRA", count: 1 }]);
+  assert.equal((tierReward[0] as any).gems, 0);
+
+  // EventGrantCardPool + EventPayEntry via the SAME EventJoin response - a
+  // Sealed run's entry: a card pool granted (bought, not earned) and gems
+  // paid (a cost, not a reward). rewardHistory.ts is what excludes both
+  // from "earned" totals - classifyRewardGrants itself stays neutral and
+  // captures both generically, same as every other source.
+  const c9 = new Classifier();
+  const sealedJoin = c9.classify({
+    direction: "response",
+    method: "EventJoin",
+    ts: "p7",
+    json: {
+      InventoryInfo: {
+        Changes: [
+          {
+            Source: "EventGrantCardPool",
+            SourceId: "Sealed_FRA_20260929",
+            Boosters: [],
+            GrantedCards: new Array(82).fill({ GrpId: 106229, CardAdded: true, SetCode: "FRA" }),
+          },
+          {
+            Source: "EventPayEntry",
+            SourceId: "b468aa16-15e5-4553-b1d9-83f9360afc80",
+            InventoryGems: -3000,
+            Boosters: [],
+            GrantedCards: [],
+          },
+        ],
+      },
+    },
+  });
+  assert.equal(sealedJoin.length, 2);
+  const poolGrant = sealedJoin.find((e) => (e as any).source === "EventGrantCardPool") as any;
+  assert.equal(poolGrant.sourceId, "Sealed_FRA_20260929");
+  assert.equal(poolGrant.grantedCardCount, 82);
+  const payEntry = sealedJoin.find((e) => (e as any).source === "EventPayEntry") as any;
+  assert.equal(payEntry.gems, -3000); // a cost, not a reward - negative on purpose
+
+  console.log("OK: classifier handled draft pack/pick/complete, match found/completed, game-state noise filtering, Bot Draft's combined pick+next-pack response, deck submission's real sideboard/format capture, EventGetCoursesV2 standings plus the generic EventCardPool capture from a course's CardPool, a synthetic 'Pick Two' (2 cards per pick) extension of both draft paths, EventClaimPrize's real captured reward shape (including its own CardPool capture, a RewardGrant emitted alongside it, and rejecting a SourceId that doesn't match the course for EventReward while RewardGrant still captures it), and RewardGrant's other three confirmed real sources (Mastery Pass tier reward via GraphProcessV2, plus Sealed's card-pool grant and entry-fee cost via EventJoin).");
 }
 
 run();

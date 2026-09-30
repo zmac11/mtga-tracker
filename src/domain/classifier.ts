@@ -1,6 +1,7 @@
 import type {
   DomainEvent,
   DraftPickMade,
+  RewardGrant,
 } from "./types.js";
 
 /**
@@ -72,6 +73,7 @@ export class Classifier {
     this.classifyDeckSubmitted(ev, json, out);
     this.classifyCourseStandings(ev, json, out);
     this.classifyEventClaimPrize(ev, json, out);
+    this.classifyRewardGrants(ev, json, out);
     this.classifyMatchRoomState(ev, json, out);
     this.classifyGreGameState(ev, json, out);
     this.classifyAuthenticate(ev, json, out);
@@ -412,6 +414,55 @@ export class Classifier {
         cardPool: course.CardPool.map(Number),
         ts: ev.ts,
       });
+    }
+  }
+
+  /**
+   * Milestone 21: generic capture behind "track overall rewards from
+   * quests etc." - see RewardGrant's doc comment in types.ts for the full
+   * rationale. Deliberately NOT scoped to method === "EventClaimPrize"
+   * (unlike classifyEventClaimPrize above): confirmed real from the
+   * user's own log that json.InventoryInfo.Changes is a top-level sibling
+   * on EventClaimPrize, GraphProcessV2 (Mastery Pass tier-ups), and
+   * EventJoin (entry cost + sealed-pool grant) alike, all at the exact
+   * same top-level position - so this fires on ANY response carrying it,
+   * regardless of method, and emits one RewardGrant per Changes[] entry
+   * with no Source filtering at all. That means a genuine event-prize
+   * claim produces BOTH an EventReward (from classifyEventClaimPrize,
+   * above, untouched by this method) AND a RewardGrant from this one -
+   * intentional duplication across two different-purpose types, not a
+   * bug (see RewardGrant's doc comment).
+   *
+   * Confirmed real and explicitly ruled out as a capture source:
+   * StartHook - it also carries InventoryInfo.Changes (39/56 of the
+   * user's real occurrences), but every single one is an empty array
+   * (pure login/session snapshot, no deltas) - so it's harmless to
+   * include here rather than special-case out, since an empty Changes
+   * array simply yields zero pushes.
+   */
+  private classifyRewardGrants(ev: ClassifiableEvent, json: Record<string, unknown>, out: DomainEvent[]) {
+    if (ev.direction !== "response") return;
+    const inventoryInfo = json.InventoryInfo;
+    if (!isObj(inventoryInfo) || !Array.isArray(inventoryInfo.Changes)) return;
+
+    for (const change of inventoryInfo.Changes) {
+      if (!isObj(change) || typeof change.Source !== "string") continue;
+
+      const boosters = Array.isArray(change.Boosters)
+        ? change.Boosters.filter(isObj).map((b) => ({ setCode: String(b.SetCode ?? ""), count: Number(b.Count ?? 0) }))
+        : [];
+
+      const grant: RewardGrant = {
+        kind: "RewardGrant",
+        source: change.Source,
+        sourceId: typeof change.SourceId === "string" ? change.SourceId : null,
+        gems: Number(change.InventoryGems ?? 0),
+        gold: Number(change.InventoryGold ?? 0),
+        boosters,
+        grantedCardCount: Array.isArray(change.GrantedCards) ? change.GrantedCards.length : 0,
+        ts: ev.ts,
+      };
+      out.push(grant);
     }
   }
 

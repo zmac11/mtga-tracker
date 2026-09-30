@@ -273,6 +273,76 @@ export interface EventCardPool {
   ts: string;
 }
 
+/**
+ * Milestone 21 (2026-10-01): "track overall rewards from quests etc. just
+ * to see overall stuff player earned" - the generic capture behind that.
+ * Arena has no dedicated "quest" endpoint anymore (checked the real log
+ * for one - nothing matches); what used to be quests is now the Mastery
+ * Pass / Campaign Graph, which grants rewards through the exact same
+ * generic InventoryInfo.Changes[] ledger EventReward already reads,
+ * just under a different Source value and from a different RPC
+ * (GraphProcessV2, not EventClaimPrize). Rather than special-case
+ * every RPC that happens to carry this field, RewardGrant captures EVERY
+ * Changes[] entry generically, from wherever json.InventoryInfo.Changes
+ * shows up (confirmed real from the user's own log: EventClaimPrize,
+ * GraphProcessV2, and EventJoin all carry it at the same top-level
+ * position) - see classifier.ts's classifyRewardGrants.
+ *
+ * This is deliberately separate from, and does NOT replace, EventReward:
+ * EventReward stays the tightly-scoped (Source=="EventReward" AND
+ * SourceId==courseId) type the existing report.ts/deck-viewer/rewardRollup
+ * wiring already relies on for a SPECIFIC event's own prize. RewardGrant
+ * is the raw, un-filtered ledger every Changes[] entry becomes, used for
+ * the new account-wide "overall rewards earned" rollup
+ * (rewardHistory.ts) - a genuine event prize claim produces BOTH an
+ * EventReward AND a RewardGrant from the same real payload; that's
+ * intentional duplication across two different-purpose types, not a bug.
+ *
+ * Confirmed real source values in the user's own log as of this
+ * writing: "EventReward" (an event's prize claim - genuinely earned),
+ * "CampaignGraphTieredRewardNode" (a Mastery Pass tier reward - also
+ * genuinely earned, this project's "quests" equivalent), "EventGrantCardPool"
+ * (a Sealed pool being granted - cards added to the collection, but this
+ * is what was PAID for by joining, not a free reward, so rewardHistory.ts
+ * deliberately excludes it from the "earned" totals), and "EventPayEntry"
+ * (negative gems - the cost of joining an event, also excluded from
+ * "earned"). Any OTHER source is bucketed as "Other" by rewardHistory.ts
+ * rather than dropped or guessed at - a future patch could easily add a
+ * new one.
+ */
+export interface RewardGrant {
+  kind: "RewardGrant";
+  source: string;
+  /**
+   * Opaque on purpose - semantics differ per source (a courseId GUID for
+   * EventReward/EventPayEntry, a literal eventId string for
+   * EventGrantCardPool, a "<pass>.<node>" string for
+   * CampaignGraphTieredRewardNode - all confirmed real, none of them a
+   * stable identifier shape worth typing narrowly here). Combined with
+   * source AND ts, this is what eventHistoryLoader.ts dedupes a
+   * replayed/re-reported grant by - same "id+ts" convention as every
+   * other source in that loader (decks, joins, rewards, cardPools).
+   * ts has to be part of the key: EventGrantCardPool's SourceId is just
+   * the literal eventId, NOT per-course, so it repeats identically across
+   * genuinely distinct real grants whenever that eventId was played more
+   * than once in a day (confirmed real: the user's own log has 3 separate
+   * Sealed_FRA_20260929 EventGrantCardPool captures, one per real
+   * courseId-disambiguated run, each with a different ts and a different
+   * GrantedCards count - deduping on source+sourceId alone would wrongly
+   * collapse those 3 distinct grants into 1). A genuine same-line replay
+   * duplicate (from re-running `--from-start`) still has an identical ts
+   * too, so it's still correctly collapsed.
+   */
+  sourceId: string | null;
+  /** This grant's own delta - not a running total (same convention as EventReward.gems). Negative for a cost (EventPayEntry). */
+  gems: number;
+  /** Best-effort - see EventReward.gold's doc comment; same "InventoryGold" key assumption, same caveat. */
+  gold: number;
+  boosters: Array<{ setCode: string; count: number }>;
+  grantedCardCount: number;
+  ts: string;
+}
+
 export type DomainEvent =
   | DraftJoined
   | DraftPackSeen
@@ -285,4 +355,5 @@ export type DomainEvent =
   | PlayerIdentified
   | CourseStanding
   | EventReward
-  | EventCardPool;
+  | EventCardPool
+  | RewardGrant;

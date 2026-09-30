@@ -54,6 +54,14 @@ export function loadEventHistorySource(store: TypedEventStore): EventHistorySour
   // see EventCardPool in types.ts. Same replayed-log dedup concern as
   // joins/rewards above.
   const cardPools = dedupeBy(store.all("EventCardPool"), (p) => `${p.courseId}|${p.ts}`);
+  // Milestone 21: generic reward-grant ledger - same id+ts dedup
+  // convention as every other source above. ts has to stay part of the
+  // key here specifically (unlike source+sourceId alone) - see
+  // RewardGrant.sourceId's doc comment in types.ts: EventGrantCardPool's
+  // SourceId is the literal eventId (not per-course), so the same
+  // eventId played more than once in a day produces multiple real,
+  // distinct grants sharing one sourceId; only ts tells them apart.
+  const rewardGrants = dedupeBy(store.all("RewardGrant"), (g) => `${g.source}|${g.sourceId}|${g.ts}`);
 
-  return { decks, completions, picks, packsSeen, matchFounds, matchCompletions, courseStandings, joins, rewards, cardPools, myScreenName };
+  return { decks, completions, picks, packsSeen, matchFounds, matchCompletions, courseStandings, joins, rewards, cardPools, rewardGrants, myScreenName };
 }

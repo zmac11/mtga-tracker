@@ -1,4 +1,4 @@
-import type { DraftPackSeen, DraftPickMade, DeckSubmitted, DraftCompleted, MatchFound, MatchCompleted, CourseStanding, DraftJoined, EventReward, EventCardPool } from "./types.js";
+import type { DraftPackSeen, DraftPickMade, DeckSubmitted, DraftCompleted, MatchFound, MatchCompleted, CourseStanding, DraftJoined, EventReward, EventCardPool, RewardGrant } from "./types.js";
 import { computeMatchOutcomes, latestStandingByEvent, reconcileWinRate, winRate, type MatchOutcome, type WinRate } from "./rollups.js";
 import { parseEventIdentity, resolveEventFormat, type EventIdentity, type EventFormat } from "./eventIdentity.js";
 import { deriveDeckVersions, type DeckVersion } from "./deckVersions.js";
@@ -123,6 +123,16 @@ export interface EventHistorySource {
    * ever used (any earlier duplicates or stale snapshots are ignored).
    */
   courseStandings: CourseStanding[];
+  /**
+   * Milestone 21: the generic "everything the account was ever granted"
+   * ledger (see RewardGrant's doc comment in types.ts) - NOT pre-filtered
+   * by event, and NOT restricted to genuinely-earned sources (it also
+   * includes EventGrantCardPool/EventPayEntry, which are a purchase and a
+   * cost respectively, not a reward). Used only by rewardHistory.ts's
+   * account-wide "overall rewards earned" rollup, which is what applies
+   * the earned-vs-not categorization - this field is deliberately raw.
+   */
+  rewardGrants: RewardGrant[];
   myScreenName: string | null;
 }
 

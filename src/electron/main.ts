@@ -22,6 +22,8 @@ import { buildLimitedStatsRows, buildStatsCardCatalog } from "../domain/statsRol
 import { generateStatsHtml } from "../statsHtml.js";
 import { buildOpponentMatchRows } from "../domain/opponentStats.js";
 import { generateOpponentHtml } from "../opponentHtml.js";
+import { buildEventRewardRows, summarizeOverallRewards } from "../domain/rewardHistory.js";
+import { generateRewardHtml } from "../rewardHtml.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -338,6 +340,8 @@ let openPastEventsPage: (() => void) | null = null;
 let openLimitedStatsPage: (() => void) | null = null;
 // Milestone 20: same module-level slot pattern as the two tray items above.
 let openOpponentHistoryPage: (() => void) | null = null;
+// Milestone 21: same module-level slot pattern as the tray items above.
+let openRewardHistoryPage: (() => void) | null = null;
 
 /**
  * Milestone 15: remembers the outcome of the last version check across
@@ -721,6 +725,7 @@ function rebuildTrayMenu(): void {
     { label: "Past Events...", click: () => openPastEventsPage?.() },
     { label: "Limited Stats...", click: () => openLimitedStatsPage?.() },
     { label: "Opponent History...", click: () => openOpponentHistoryPage?.() },
+    { label: "Reward History...", click: () => openRewardHistoryPage?.() },
     { type: "separator" },
     { label: formatLastCardRefreshLabel(cardRefreshStatus), enabled: false },
     {
@@ -1216,6 +1221,52 @@ app.whenReady().then(() => {
       try {
         if (Notification.isSupported()) {
           new Notification({ title: "MTGA Tracker", body: "Couldn't open Opponent History - check the logs." }).show();
+        }
+      } catch {
+        // Notifications are a nice-to-have.
+      }
+    } finally {
+      store?.close();
+      cardStore?.close();
+    }
+  };
+
+  /**
+   * Milestone 21 (2026-10-01): "layout of event rewards - button in
+   * settings -> layout where I can filter for events by format, set and
+   * see rewards earned. Also I want to track overall rewards from quests
+   * etc." - the tray's "Reward History..." item (see rewardHtml.ts's own
+   * header for why this is a tray item rather than literally inside the
+   * Settings window). Builds one EventRewardRow per event run (entry cost
+   * + prize claim, reusing eventHistory.ts's own .entry/.reward - no new
+   * capture needed for that half) plus the account-wide
+   * OverallRewardSummary (the new generic RewardGrant ledger - see
+   * domain/rewardHistory.ts and RewardGrant's doc comment in types.ts for
+   * the "quests etc." = Mastery Pass mapping), same self-contained-page
+   * convention as Opponent History above.
+   */
+  openRewardHistoryPage = (): void => {
+    const dbPath = join(pipeline.dataDir, "tracker.db");
+    let store: TypedEventStore | null = null;
+    let cardStore: CardStore | null = null;
+    try {
+      store = new TypedEventStore(dbPath);
+      cardStore = new CardStore(dbPath);
+      const source = loadEventHistorySource(store);
+      const rows = buildEventRewardRows(source);
+      const overall = summarizeOverallRewards(source.rewardGrants);
+
+      const html = generateRewardHtml(rows, overall);
+      const outDir = join(pipeline.dataDir, "rewards");
+      mkdirSync(outDir, { recursive: true });
+      const outPath = join(outDir, "reward-history.html");
+      writeFileSync(outPath, html, "utf8");
+      shell.openPath(outPath);
+    } catch (err) {
+      console.error("Failed to generate/open reward history page:", err);
+      try {
+        if (Notification.isSupported()) {
+          new Notification({ title: "MTGA Tracker", body: "Couldn't open Reward History - check the logs." }).show();
         }
       } catch {
         // Notifications are a nice-to-have.
