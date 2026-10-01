@@ -23,6 +23,8 @@ import { listEventRuns, buildEventRunHistory } from "../domain/eventHistory.js";
 import { generatePastEventsHtml, type PastEventRow } from "../pastEventsHtml.js";
 import { buildLimitedStatsRows, buildStatsCardCatalog, winRateOf } from "../domain/statsRollup.js";
 import { generateStatsHtml } from "../statsHtml.js";
+import { buildPickPriorityRows } from "../domain/draftPickPriority.js";
+import { generateDraftPickStatsHtml, type DraftPickStatsRow } from "../draftPickStatsHtml.js";
 import { buildOpponentMatchRows } from "../domain/opponentStats.js";
 import { generateOpponentHtml } from "../opponentHtml.js";
 import { buildEventRewardRows, summarizeOverallRewards } from "../domain/rewardHistory.js";
@@ -362,6 +364,8 @@ let openLimitedStatsPage: (() => void) | null = null;
 let openOpponentHistoryPage: (() => void) | null = null;
 // Milestone 21: same module-level slot pattern as the tray items above.
 let openRewardHistoryPage: (() => void) | null = null;
+// Milestone 23 (feature d): same module-level slot pattern as the tray items above.
+let openDraftPickStatsPage: (() => void) | null = null;
 
 /**
  * Milestone 15: remembers the outcome of the last version check across
@@ -780,6 +784,7 @@ function rebuildTrayMenu(): void {
     { label: "Limited Stats...", click: () => openLimitedStatsPage?.() },
     { label: "Opponent History...", click: () => openOpponentHistoryPage?.() },
     { label: "Reward History...", click: () => openRewardHistoryPage?.() },
+    { label: "Draft Pick Stats...", click: () => openDraftPickStatsPage?.() },
     { type: "separator" },
     { label: formatLastCardRefreshLabel(cardRefreshStatus), enabled: false },
     {
@@ -1465,6 +1470,62 @@ app.whenReady().then(() => {
       try {
         if (Notification.isSupported()) {
           new Notification({ title: "MTGA Tracker", body: "Couldn't open Limited Stats - check the logs." }).show();
+        }
+      } catch {
+        // Notifications are a nice-to-have.
+      }
+    } finally {
+      store?.close();
+      cardStore?.close();
+    }
+  };
+
+  /**
+   * Milestone 23 (feature d): "in settings there should be a draft filter
+   * button to view such draft data" - the tray's "Draft Pick Stats..."
+   * item. Dataset-wide (every draft ever captured, not just one run) -
+   * reuses the same loadEventHistorySource this file's openLimitedStatsPage
+   * already calls for its picks/packsSeen fields, feeds them through
+   * domain/draftPickPriority.ts's buildPickPriorityRows, and joins in
+   * name/colors from the card catalog before rendering the static,
+   * client-side-filtered page (draftPickStatsHtml.ts) - same
+   * self-contained-page/no-new-IPC-surface convention as Limited Stats.
+   */
+  openDraftPickStatsPage = (): void => {
+    const dbPath = join(pipeline.dataDir, "tracker.db");
+    let store: TypedEventStore | null = null;
+    let cardStore: CardStore | null = null;
+    try {
+      store = new TypedEventStore(dbPath);
+      cardStore = new CardStore(dbPath);
+      const source = loadEventHistorySource(store);
+      const priorityRows = buildPickPriorityRows(source.picks, source.packsSeen);
+      const cardsById = new Map<number, { name: string; colors: string[] }>();
+      for (const c of cardStore.all()) cardsById.set(c.grpId, { name: c.name, colors: c.colors });
+      const rows: DraftPickStatsRow[] = priorityRows.map((r) => {
+        const info = cardsById.get(r.grpId);
+        return {
+          cardId: r.grpId,
+          name: info?.name ?? `Unknown card #${r.grpId} (run npm run refresh-cards)`,
+          colors: info?.colors ?? [],
+          timesPicked: r.timesPicked,
+          avgOthersInPack: r.avgOthersInPack,
+          minOthersInPack: r.minOthersInPack,
+          maxOthersInPack: r.maxOthersInPack,
+        };
+      });
+
+      const html = generateDraftPickStatsHtml(rows);
+      const outDir = join(pipeline.dataDir, "stats");
+      mkdirSync(outDir, { recursive: true });
+      const outPath = join(outDir, "draft-pick-stats.html");
+      writeFileSync(outPath, html, "utf8");
+      shell.openPath(outPath);
+    } catch (err) {
+      console.error("Failed to generate/open draft pick stats page:", err);
+      try {
+        if (Notification.isSupported()) {
+          new Notification({ title: "MTGA Tracker", body: "Couldn't open Draft Pick Stats - check the logs." }).show();
         }
       } catch {
         // Notifications are a nice-to-have.
