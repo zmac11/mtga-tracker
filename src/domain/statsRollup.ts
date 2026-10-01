@@ -2,6 +2,7 @@ import type { EventHistorySource } from "./eventHistory.js";
 import { listEventRuns, buildEventRunHistory } from "./eventHistory.js";
 import { deriveDeckColors, type ColorLetter } from "./deckColors.js";
 import type { WinRate } from "./rollups.js";
+import { buildMatchGameDetails, turnCountTotals } from "./matchDetails.js";
 
 /**
  * Milestone 20 (2026-09-30): "Add some kind of filter for event types and
@@ -50,6 +51,21 @@ export interface LimitedStatsRow {
   splashColors: ColorLetter[];
   wins: number;
   losses: number;
+  /**
+   * Milestone 24 (2026-10-01): "average turns per format and per set in
+   * limited" - raw sum/count (not a pre-divided average), same convention
+   * wins/losses above already use, so statsHtml.ts can correctly
+   * re-aggregate a weighted average across however many rows the live
+   * subtype/set/color filter currently matches, rather than averaging
+   * each run's own average a second time (which would quietly overweight
+   * a run with fewer games). Averaged PER GAME, not per match - a run
+   * with a 3-game Bo3 counts three data points, not one match-level
+   * number (see matchDetails.ts's averageTurnCount for why). 0/0 (not
+   * null) when this run has no captured turn data at all, so summing
+   * across rows never needs a null check.
+   */
+  totalTurns: number;
+  turnGameCount: number;
   /** This run's own (latest) maindeck (cardId+quantity), or empty if no deck was captured - see this interface's header comment for why it's carried here. */
   mainDeck: Array<{ cardId: number; quantity: number }>;
   /**
@@ -118,12 +134,15 @@ export interface StatsCardInfo {
  */
 export function buildLimitedStatsRows(source: EventHistorySource, cardColors: Map<number, string[]>): LimitedStatsRow[] {
   const rows: LimitedStatsRow[] = [];
+  const gameDetails = buildMatchGameDetails(source.gameStateSnapshots, source.matchFounds, source.myScreenName);
+
   for (const run of listEventRuns(source)) {
     const history = buildEventRunHistory(run.eventId, source, run.courseId);
     if (history.format !== "Draft" && history.format !== "Sealed") continue;
 
     const mainDeck = history.deck?.mainDeck ?? [];
     const profile = history.deck ? deriveDeckColors(mainDeck, cardColors) : null;
+    const { totalTurns, gameCount } = turnCountTotals(gameDetails, history.matches.map((m) => m.matchId));
 
     rows.push({
       eventId: run.eventId,
@@ -137,6 +156,8 @@ export function buildLimitedStatsRows(source: EventHistorySource, cardColors: Ma
       splashColors: profile?.splashColors ?? [],
       wins: history.winRate.wins,
       losses: history.winRate.losses,
+      totalTurns,
+      turnGameCount: gameCount,
       mainDeck,
       deckVersions: history.deckVersions.map((v) => ({ mainDeck: v.mainDeck, wins: v.winRate.wins, losses: v.winRate.losses })),
       deckViewerFileName: null,

@@ -11,7 +11,7 @@ import type { EventHistorySource } from "./eventHistory.js";
 import type { RewardGrant } from "./types.js";
 
 function baseSource(): EventHistorySource {
-  return { decks: [], completions: [], picks: [], packsSeen: [], matchFounds: [], matchCompletions: [], courseStandings: [], joins: [], rewards: [], cardPools: [], rewardGrants: [], handEvents: [], playedEvents: [], myScreenName: "Me" };
+  return { decks: [], completions: [], picks: [], packsSeen: [], matchFounds: [], matchCompletions: [], courseStandings: [], joins: [], rewards: [], cardPools: [], rewardGrants: [], handEvents: [], playedEvents: [], gameStateSnapshots: [], myScreenName: "Me" };
 }
 
 function run() {

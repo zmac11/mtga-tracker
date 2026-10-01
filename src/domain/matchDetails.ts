@@ -109,3 +109,48 @@ export function buildMatchGameDetails(snapshots: GameStateSnapshot[], matchFound
 
   return result;
 }
+
+/**
+ * Milestone 24 (2026-10-01): "I want to have number of turns displayed for
+ * each match. Also average number for chosen deck" (plus per-format/
+ * per-set breakdowns elsewhere - see statsRollup.ts). Averages PER GAME,
+ * not per match - per the user's own explicit choice, a 3-game Bo3
+ * contributes three data points to an average, not one summed number
+ * (every match captured so far is still Bo1, so this is one game per
+ * match in practice today, but the distinction matters once a real Bo3 is
+ * captured).
+ *
+ * Takes the already-built `gameDetails` map (buildMatchGameDetails' own
+ * return value) rather than snapshots/matchFounds/myScreenName directly,
+ * so a caller already computing per-match turn detail (e.g.
+ * opponentStats.ts, which needs the SAME map's turnCounts for its own
+ * per-match rows) builds it once and reuses it here rather than this
+ * function re-deriving it a second time from raw snapshots.
+ */
+export function turnCountTotals(gameDetails: Map<string, MatchGameSummary[]>, matchIds: Iterable<string>): { totalTurns: number; gameCount: number } {
+  let totalTurns = 0;
+  let gameCount = 0;
+  for (const matchId of matchIds) {
+    for (const g of gameDetails.get(matchId) ?? []) {
+      if (g.turnCount === null) continue; // no resolved turnNumber ever seen for this game - absent, not zero
+      totalTurns += g.turnCount;
+      gameCount += 1;
+    }
+  }
+  return { totalTurns, gameCount };
+}
+
+/**
+ * Convenience wrapper around turnCountTotals for a caller that only wants
+ * the final average (deckViewerLoader.ts's single-run page, which has no
+ * further cross-row aggregation to do) - a caller that DOES need to
+ * re-aggregate across several of these (statsRollup.ts's per-run rows,
+ * summed later by whichever subtype/set/color filter is currently active
+ * in statsHtml.ts) should call turnCountTotals directly and keep the raw
+ * sum/count, the same reason wins/losses are stored raw rather than as a
+ * pre-divided pct everywhere else in this project.
+ */
+export function averageTurnCount(gameDetails: Map<string, MatchGameSummary[]>, matchIds: Iterable<string>): { avgTurns: number | null; gameCount: number } {
+  const { totalTurns, gameCount } = turnCountTotals(gameDetails, matchIds);
+  return { avgTurns: gameCount > 0 ? totalTurns / gameCount : null, gameCount };
+}

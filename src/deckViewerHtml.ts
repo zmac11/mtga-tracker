@@ -114,6 +114,17 @@ export interface DeckViewerData {
   /** Milestone 15: deckColors.ts's deriveDeckColors().splashColors - colors present but below the main-color threshold, shown separately from colorCombo rather than silently dropped. Optional (defaults to none) for older callers/tests that don't pass it. */
   splashColors?: string[];
   winRate: { wins: number; losses: number; total: number; pct: string };
+  /**
+   * Milestone 24 (2026-10-01): "average number [of turns] for chosen
+   * deck" - averaged PER GAME across this run's own matches (a 3-game Bo3
+   * would contribute 3 data points, not 1 - see matchDetails.ts's
+   * averageTurnCount), not this version-level breakdown's own matches.
+   * null when none of this run's matches have any captured turn data at
+   * all (not the same as 0 turns) - omitted/undefined for an older
+   * caller/test that doesn't pass one, same convention as avgManaValue
+   * above.
+   */
+  avgTurns?: number | null;
   mainDeck: ViewerCard[];
   /** Null when there's no DraftCompleted captured for this run to derive a sideboard from (see eventHistory.ts). */
   sideboard: ViewerCard[] | null;
@@ -278,6 +289,8 @@ export interface DeckHeaderData {
   splashColors?: string[];
   winRate: { wins: number; losses: number; total: number; pct: string };
   avgManaValue?: AverageManaValue;
+  /** Milestone 24: see DeckViewerData.avgTurns' doc comment - same field, just threaded through the smaller header-only shape. */
+  avgTurns?: number | null;
   entry?: { currencyType: string; amountPaid: number } | null;
   reward?: DeckViewerReward | null;
   runLabel?: string | null;
@@ -289,6 +302,7 @@ export function renderDeckHeaderHtml(data: DeckHeaderData): string {
   const splashColors = data.splashColors ?? [];
   const splashLine = splashColors.length > 0 ? ` <span class="muted">(splash: ${splashColors.map((c) => escapeHtml(c)).join("")})</span>` : "";
   const avgMvLine = data.avgManaValue && data.avgManaValue.value !== null ? ` &middot; Avg. MV: <strong>${data.avgManaValue.value.toFixed(2)}</strong>` : "";
+  const avgTurnsLine = data.avgTurns !== undefined && data.avgTurns !== null ? ` &middot; Avg. turns: <strong>${data.avgTurns.toFixed(1)}</strong>` : "";
   const entryLine = data.entry ? ` &middot; Entry: <strong>${data.entry.amountPaid} ${escapeHtml(data.entry.currencyType)}</strong>` : "";
   const rewardText = data.reward ? formatReward(data.reward) : null;
   const rewardLine = rewardText ? ` &middot; Reward: <strong>${rewardText}</strong>` : "";
@@ -296,7 +310,7 @@ export function renderDeckHeaderHtml(data: DeckHeaderData): string {
   return `<div class="header">
     <h1>${escapeHtml(data.deckName ?? "(no deck submission captured)")}</h1>
     <div class="meta">[${escapeHtml(data.format)}] ${escapeHtml(data.definitionLabel)} &middot; ${escapeHtml(data.eventId)}${data.runLabel ? ` &middot; <strong>${escapeHtml(data.runLabel)}</strong>` : ""}</div>
-    <div class="meta">Colors: <strong>${escapeHtml(data.colorCombo)}</strong>${splashLine} &middot; Record: <strong>${recordLine}</strong>${avgMvLine}${entryLine}${rewardLine}</div>
+    <div class="meta">Colors: <strong>${escapeHtml(data.colorCombo)}</strong>${splashLine} &middot; Record: <strong>${recordLine}</strong>${avgMvLine}${avgTurnsLine}${entryLine}${rewardLine}</div>
   </div>`;
 }
 

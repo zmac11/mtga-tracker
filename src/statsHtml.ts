@@ -107,7 +107,7 @@ ${FAVICON_LINK_TAG}
 
   <table>
     <thead>
-      <tr><th>Event type</th><th>Set</th><th>Deck</th><th>Colors</th><th>Record</th><th>Win%</th></tr>
+      <tr><th>Event type</th><th>Set</th><th>Deck</th><th>Colors</th><th>Record</th><th>Win%</th><th>Avg turns</th></tr>
     </thead>
     <tbody id="rows-body"></tbody>
   </table>
@@ -169,6 +169,19 @@ ${FAVICON_LINK_TAG}
       return { wins, losses, total, pct };
     }
 
+    // Milestone 24 (2026-10-01): "average turns per format and per set in
+    // limited" - averaged per GAME (totalTurns/turnGameCount are each
+    // row's own raw sum/count, not a pre-divided average - see
+    // statsRollup.ts's LimitedStatsRow doc comment for why), so summing
+    // across however many rows the live filter matches and dividing once
+    // here gives the correct weighted average rather than averaging each
+    // run's own average a second time.
+    function avgTurnsOf(list) {
+      const totalTurns = list.reduce((sum, r) => sum + r.totalTurns, 0);
+      const gameCount = list.reduce((sum, r) => sum + r.turnGameCount, 0);
+      return gameCount > 0 ? (totalTurns / gameCount).toFixed(1) : "-";
+    }
+
     function escapeText(s) {
       const div = document.createElement("div");
       div.textContent = s;
@@ -193,7 +206,8 @@ ${FAVICON_LINK_TAG}
       summary.innerHTML =
         '<div><div class="big ' + cls + '">' + wr.wins + '-' + wr.losses + '</div><div class="muted">record</div></div>' +
         '<div><div class="big ' + cls + '">' + wr.pct + '</div><div class="muted">win rate</div></div>' +
-        '<div><div class="big">' + filtered.length + '</div><div class="muted">' + (filtered.length === 1 ? "run" : "runs") + '</div></div>';
+        '<div><div class="big">' + filtered.length + '</div><div class="muted">' + (filtered.length === 1 ? "run" : "runs") + '</div></div>' +
+        '<div><div class="big">' + avgTurnsOf(filtered) + '</div><div class="muted">avg turns/game</div></div>';
 
       const body = document.getElementById("rows-body");
       body.innerHTML = "";
@@ -207,7 +221,8 @@ ${FAVICON_LINK_TAG}
           "<td>" + (r.deckViewerFileName ? '<a href="../deck-viewer/' + encodeURIComponent(r.deckViewerFileName) + '">' + escapeText(r.deckName || "(no deck captured)") + "</a>" : escapeText(r.deckName || "(no deck captured)")) + "</td>" +
           "<td>" + escapeText(r.colorCombo) + "</td>" +
           '<td><span class="record-win">' + r.wins + '</span>-<span class="record-loss">' + r.losses + "</span></td>" +
-          "<td>" + pct + "</td>";
+          "<td>" + pct + "</td>" +
+          "<td>" + avgTurnsOf([r]) + "</td>";
         body.appendChild(tr);
       }
       document.getElementById("empty-note").style.display = filtered.length === 0 ? "block" : "none";

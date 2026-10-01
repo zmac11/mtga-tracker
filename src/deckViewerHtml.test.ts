@@ -226,20 +226,29 @@ function run() {
   assert.ok(!html.includes("Avg. MV:"));
   assert.ok(!html.includes("Entry:"));
   assert.ok(!html.includes("Reward:"));
+  assert.ok(!html.includes("Avg. turns:")); // milestone 24: omitted when avgTurns isn't passed, same "nothing to show" treatment
 
   const withExtras = generateDeckViewerHtml({
     ...data,
     avgManaValue: { value: 2.875, consideredCount: 16, excludedCount: 8 },
     entry: { currencyType: "Gems", amountPaid: 1500 },
     reward: { gems: 650, gold: 0, boosters: [{ setCode: "HOB", count: 2 }], grantedCardCount: 0 },
+    avgTurns: 8.667,
   });
   assert.ok(withExtras.includes("Avg. MV: <strong>2.88</strong>"));
   assert.ok(withExtras.includes("Entry: <strong>1500 Gems</strong>"));
   assert.ok(withExtras.includes("Reward: <strong>650 Gems, 2x HOB Boosters</strong>"));
+  assert.ok(withExtras.includes("Avg. turns: <strong>8.7</strong>"));
 
   // avgManaValue with nothing considered (value: null, e.g. an all-land deck) shows nothing, same as omitted.
   const nullAvgMv = generateDeckViewerHtml({ ...data, avgManaValue: { value: null, consideredCount: 0, excludedCount: 23 } });
   assert.ok(!nullAvgMv.includes("Avg. MV:"));
+
+  // avgTurns: null (no captured turn data for any of this run's matches) shows nothing, same as omitted - distinct from 0, which would be a real (if unlikely) data point.
+  const nullAvgTurns = generateDeckViewerHtml({ ...data, avgTurns: null });
+  assert.ok(!nullAvgTurns.includes("Avg. turns:"));
+  const zeroAvgTurns = generateDeckViewerHtml({ ...data, avgTurns: 0 });
+  assert.ok(zeroAvgTurns.includes("Avg. turns: <strong>0.0</strong>"));
 
   // A reward with everything at zero (shouldn't really happen, but defensively) - the whole line is omitted, same "nothing to show" treatment as avgManaValue/entry above, rather than an empty "Reward: <strong></strong>".
   const emptyReward = generateDeckViewerHtml({ ...data, reward: { gems: 0, gold: 0, boosters: [], grantedCardCount: 0 } });

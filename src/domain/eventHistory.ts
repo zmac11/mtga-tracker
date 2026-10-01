@@ -1,4 +1,4 @@
-import type { DraftPackSeen, DraftPickMade, DeckSubmitted, DraftCompleted, MatchFound, MatchCompleted, CourseStanding, DraftJoined, EventReward, EventCardPool, RewardGrant, GameHandResolved, CardPlayedInGame } from "./types.js";
+import type { DraftPackSeen, DraftPickMade, DeckSubmitted, DraftCompleted, MatchFound, MatchCompleted, CourseStanding, DraftJoined, EventReward, EventCardPool, RewardGrant, GameHandResolved, CardPlayedInGame, GameStateSnapshot } from "./types.js";
 import { computeMatchOutcomes, latestStandingByEvent, reconcileWinRate, winRate, type MatchOutcome, type WinRate } from "./rollups.js";
 import { parseEventIdentity, resolveEventFormat, type EventIdentity, type EventFormat } from "./eventIdentity.js";
 import { deriveDeckVersions, type DeckVersion } from "./deckVersions.js";
@@ -143,6 +143,17 @@ export interface EventHistorySource {
    */
   handEvents: GameHandResolved[];
   playedEvents: CardPlayedInGame[];
+  /**
+   * Milestone 24 (2026-10-01): "number of turns displayed for each match"
+   * plus average-turns breakdowns - the raw source matchDetails.ts's
+   * buildMatchGameDetails needs (it already computed per-game turnCount
+   * since milestone 20, just never threaded through this loader - every
+   * caller that wants per-game turn detail alongside a match/run needs
+   * both this AND matchFounds/myScreenName, already present below).
+   * Dataset-wide and NOT pre-filtered, same convention as every other
+   * source here.
+   */
+  gameStateSnapshots: GameStateSnapshot[];
   myScreenName: string | null;
 }
 

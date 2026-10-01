@@ -1,6 +1,7 @@
 import type { EventHistorySource } from "./eventHistory.js";
 import { listEventRuns, buildEventRunHistory } from "./eventHistory.js";
 import { computeMatchOutcomes, winRateFromCounts, type WinRate } from "./rollups.js";
+import { buildMatchGameDetails } from "./matchDetails.js";
 
 /**
  * Milestone 20 (2026-09-30): "I want to search which opponents I have
@@ -50,11 +51,26 @@ export interface OpponentMatchRow {
   reason: string | null;
   ts: string;
   myDeckName: string | null;
+  /**
+   * Milestone 24 (2026-10-01): "I want to have number of turns displayed
+   * for each match" - one entry per game of this match, in gameNumber
+   * order (matchDetails.ts's MatchGameSummary.turnCount), per the user's
+   * own choice to track turns per GAME rather than summed per match. A
+   * game whose turnCount was never resolved is simply omitted, same
+   * "absent, not zero" convention the rest of this project already uses -
+   * so this is empty (not [0] or [null]) for a match with no captured
+   * turn data at all. Always length 1 for every real match captured so
+   * far (every one is Bo1); would be length 2-3 for a real Bo3.
+   */
+  turnCounts: number[];
 }
 
 export function buildOpponentMatchRows(source: EventHistorySource): OpponentMatchRow[] {
   const rows: OpponentMatchRow[] = [];
   const seenMatchIds = new Set<string>();
+  const gameDetails = buildMatchGameDetails(source.gameStateSnapshots, source.matchFounds, source.myScreenName);
+  const turnCountsFor = (matchId: string): number[] =>
+    (gameDetails.get(matchId) ?? []).map((g) => g.turnCount).filter((t): t is number => t !== null);
 
   for (const run of listEventRuns(source)) {
     const history = buildEventRunHistory(run.eventId, source, run.courseId);
@@ -73,6 +89,7 @@ export function buildOpponentMatchRows(source: EventHistorySource): OpponentMatc
         reason: m.reason,
         ts: m.ts,
         myDeckName: history.deck?.deckName ?? null,
+        turnCounts: turnCountsFor(m.matchId),
       });
     }
   }
@@ -94,6 +111,7 @@ export function buildOpponentMatchRows(source: EventHistorySource): OpponentMatc
       reason: o.reason,
       ts: o.ts,
       myDeckName: null,
+      turnCounts: turnCountsFor(o.matchId),
     });
   }
 

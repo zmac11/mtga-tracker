@@ -76,7 +76,7 @@ ${FAVICON_LINK_TAG}
     <h3 id="detail-title"></h3>
     <table>
       <thead>
-        <tr><th>Date</th><th>Event</th><th>Format</th><th>My deck</th><th>Result</th></tr>
+        <tr><th>Date</th><th>Event</th><th>Format</th><th>My deck</th><th>Result</th><th>Turns</th></tr>
       </thead>
       <tbody id="detail-rows-body"></tbody>
     </table>
@@ -178,12 +178,18 @@ ${FAVICON_LINK_TAG}
           m.outcome === "LOSS" ? '<span class="record-loss">LOSS</span>' + (m.reason ? " (" + escapeText(m.reason) + ")" : "") :
           '<span class="in-progress">in progress / not captured</span>';
         const tr = document.createElement("tr");
+        // Joined with "/" (not "+") - these are each game's OWN turn
+        // count, not a sum, per the same "average per game, not per
+        // match" convention this project's turn-count averages use
+        // elsewhere (matchDetails.ts's averageTurnCount).
+        const turnsText = m.turnCounts.length > 0 ? m.turnCounts.join(" / ") : "-";
         tr.innerHTML =
           "<td>" + formatDate(m.ts) + "</td>" +
           "<td>" + escapeText(m.definitionLabel || m.eventId || "-") + "</td>" +
           "<td>" + escapeText(m.format) + "</td>" +
           "<td>" + escapeText(m.myDeckName || "(no deck captured)") + "</td>" +
-          "<td>" + resultHtml + "</td>";
+          "<td>" + resultHtml + "</td>" +
+          "<td>" + turnsText + "</td>";
         body.appendChild(tr);
       }
     }

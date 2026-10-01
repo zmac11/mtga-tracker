@@ -6,6 +6,7 @@ import { loadEventHistorySource } from "./eventHistoryLoader.js";
 import { deriveDeckColors } from "./domain/deckColors.js";
 import { attributeDraftWheel } from "./domain/draftWheel.js";
 import { averageManaValue, type CardCurveInfo } from "./domain/manaCurve.js";
+import { buildMatchGameDetails, averageTurnCount } from "./domain/matchDetails.js";
 import type { DeckViewerData, DeckViewerVersion, DraftViewerPick, DraftViewerPickCard, ViewerCard } from "./deckViewerHtml.js";
 
 /**
@@ -83,6 +84,13 @@ export function buildDeckViewerData(eventId: string, store: TypedEventStore, car
   for (const c of cardStore.all()) cardCurveInfo.set(c.grpId, { types: c.types, manaCost: c.manaCost });
   const avgManaValue = history.deck ? averageManaValue(history.deck.mainDeck, cardCurveInfo) : undefined;
 
+  // Milestone 24 (2026-10-01): "average number [of turns] for chosen
+  // deck" - per-GAME average (see matchDetails.ts's averageTurnCount)
+  // across this run's own matches (history.matches, already correctly
+  // scoped to this specific run/courseId by buildEventRunHistory above).
+  const gameDetails = buildMatchGameDetails(source.gameStateSnapshots, source.matchFounds, source.myScreenName);
+  const { avgTurns } = averageTurnCount(gameDetails, history.matches.map((m) => m.matchId));
+
   // Milestone 17: every played deck version, resolved to full ViewerCards
   // via the same toViewerCards helper the current deck uses above - so a
   // version in the "Versions" tab renders identically to the "Deck list"
@@ -141,6 +149,7 @@ export function buildDeckViewerData(eventId: string, store: TypedEventStore, car
     colorCombo,
     splashColors,
     winRate: history.winRate,
+    avgTurns,
     mainDeck,
     sideboard,
     draft,

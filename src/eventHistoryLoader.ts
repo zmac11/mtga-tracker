@@ -1,6 +1,8 @@
 import type { TypedEventStore } from "./db/sqliteStore.js";
 import type { EventHistorySource } from "./domain/eventHistory.js";
 import type { CardPlayedInGame, DraftPickMade, GameHandResolved } from "./domain/types.js";
+// GameStateSnapshot has no replayed-log dedup concern worth adding here -
+// see the note next to where it's read below.
 
 /**
  * Thin loader between tracker.db and the pure domain/eventHistory.ts
@@ -69,6 +71,13 @@ export function loadEventHistorySource(store: TypedEventStore): EventHistorySour
   // identifying WHAT happened is the key instead.
   const handEvents: GameHandResolved[] = dedupeBy(store.all("GameHandResolved"), (h) => `${h.matchId}|${h.gameNumber}|${h.seat}|${h.ts}`);
   const playedEvents: CardPlayedInGame[] = dedupeBy(store.all("CardPlayedInGame"), (p) => `${p.matchId}|${p.gameNumber}|${p.seat}|${p.grpId}|${p.ts}`);
+  // Milestone 24: turn-count source for matchDetails.ts's
+  // buildMatchGameDetails. No dedup applied - report.ts's own existing
+  // call to store.all("GameStateSnapshot") never dedupes these either,
+  // and buildMatchGameDetails itself only ever reads the MAX turnNumber
+  // seen per game, so a replayed-log duplicate snapshot is harmless (same
+  // value seen twice changes nothing).
+  const gameStateSnapshots = store.all("GameStateSnapshot");
 
-  return { decks, completions, picks, packsSeen, matchFounds, matchCompletions, courseStandings, joins, rewards, cardPools, rewardGrants, handEvents, playedEvents, myScreenName };
+  return { decks, completions, picks, packsSeen, matchFounds, matchCompletions, courseStandings, joins, rewards, cardPools, rewardGrants, handEvents, playedEvents, gameStateSnapshots, myScreenName };
 }

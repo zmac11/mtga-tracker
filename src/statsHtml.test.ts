@@ -24,6 +24,8 @@ function run() {
       splashColors: [],
       wins: 3,
       losses: 1,
+      totalTurns: 40,
+      turnGameCount: 4,
       mainDeck: [{ cardId: 1, quantity: 17 }],
       deckVersions: [],
       deckViewerFileName: "QuickDraft_WOE_20260901.html",
@@ -41,6 +43,8 @@ function run() {
       splashColors: [],
       wins: 0,
       losses: 0,
+      totalTurns: 0,
+      turnGameCount: 0,
       mainDeck: [],
       deckVersions: [],
       deckViewerFileName: null,
@@ -77,6 +81,15 @@ function run() {
   assert.ok(html.includes('a.download = "mtga-shared-decks.html"'));
   // Filters out rows with no captured deck (shareFragmentHtml === null) rather than exporting an empty section for them.
   assert.ok(html.includes("filter((r) => r.shareFragmentHtml)"));
+
+  // Milestone 24 (2026-10-01): "average turns per format and per set in
+  // limited" - the new column header and each row's raw totalTurns/
+  // turnGameCount are embedded for the client-side avgTurnsOf to
+  // re-aggregate across the live subtype/set/color filter.
+  assert.ok(html.includes("<th>Avg turns</th>"));
+  assert.ok(html.includes('"totalTurns":40'));
+  assert.ok(html.includes('"turnGameCount":4'));
+  assert.ok(html.includes("avg turns/game"));
 
   console.log("OK: generateStatsHtml embeds each row's pre-rendered shareFragmentHtml and the shared {head, tail} shareShell as their own JSON blocks, and renders an 'Export filtered decks' button whose client-side handler assembles a combined page (Blob + <a download>) from whichever currently-filtered rows actually have a captured deck.");
 }
