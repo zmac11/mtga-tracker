@@ -1,6 +1,8 @@
 import type {
+  CardPlayedInGame,
   DomainEvent,
   DraftPickMade,
+  GameHandResolved,
   RewardGrant,
 } from "./types.js";
 
@@ -30,6 +32,33 @@ function isObj(v: unknown): v is Record<string, unknown> {
 }
 
 /**
+ * Milestone 23 (features e/f): one match's worth of zone-tracking state for
+ * GameHandResolved/CardPlayedInGame - see classifyHandAndPlayedCards.
+ */
+interface ZoneGameState {
+  /** Arena's own gameNumber for whatever game this state currently describes - updated whenever a gameInfo.gameNumber arrives; null until one does (see classifyGreGameState). */
+  gameNumber: number | null;
+  /** Every instanceId -> grpId this game has ever revealed to us (gameObjects entries accumulate; never removed, so a card's identity is still known after it leaves hand). */
+  grpIdByInstanceId: Map<number, number>;
+  /** Each seat's current Hand zone content (instanceIds), from the latest zones diff that touched it - a fresh deal/redraw during mulligan just replaces this wholesale, same as Arena's own diffs do. */
+  lastHandByOwnerSeat: Map<number, Set<number>>;
+  /** Which seats' opening (post-mulligan, post-bottom) hand has already been frozen and reported via GameHandResolved this game - also gates CardPlayedInGame (a card leaving hand before this fires is mulligan/redraw churn, not a real play). */
+  openingHandResolvedSeats: Set<number>;
+  /** instanceIds already reported via CardPlayedInGame this game - never report the same physical card leaving hand twice. */
+  playedInstanceIdsEmitted: Set<number>;
+}
+
+function freshZoneGameState(): ZoneGameState {
+  return {
+    gameNumber: null,
+    grpIdByInstanceId: new Map(),
+    lastHandByOwnerSeat: new Map(),
+    openingHandResolvedSeats: new Set(),
+    playedInstanceIdsEmitted: new Set(),
+  };
+}
+
+/**
  * Turns generic captured blocks into typed domain events.
  *
  * Field names/shapes here are taken from a real captured draft + match
@@ -51,6 +80,16 @@ export class Classifier {
   private pendingPicks: DraftPickMade[] = [];
   /** GRE game-state diffs often omit matchID; carry the last one we saw. */
   private lastKnownMatchId: string | null = null;
+  /**
+   * Milestone 23 (features e/f): per-match zone-tracking state for
+   * GameHandResolved/CardPlayedInGame - see classifyHandAndPlayedCards.
+   * Keyed by matchId (not matchId+gameNumber - a fresh deal detected mid-
+   * match resets the SAME entry for a new game, rather than partitioning
+   * by gameNumber, since gameInfo.gameNumber arrives too sparsely/
+   * unpredictably to safely key state-partitioning on it - see that
+   * method's own comment).
+   */
+  private zoneStateByMatch = new Map<string, ZoneGameState>();
   /**
    * The log never puts a draftId on DraftCompleteDraft's response, only on
    * the pack/pick events that came before it - so we track "whichever
@@ -537,6 +576,15 @@ export class Classifier {
         : [];
       const turnInfo = isObj(gsm.turnInfo) ? gsm.turnInfo : null;
 
+      // Milestone 23 (features e/f): zone/hand/played-card tracking runs
+      // for EVERY GameStateMessage, unlike the GameStateSnapshot emission
+      // below (which skips "pure noise" diffs) - a pure zone-transfer diff
+      // (e.g. a card leaving hand) carries none of players/stage/turnInfo
+      // and would never be seen here at all if this ran after that skip.
+      if (this.lastKnownMatchId) {
+        this.classifyHandAndPlayedCards(ev, gsm, this.lastKnownMatchId, out);
+      }
+
       // Skip pure noise (diffs that touch neither life totals, stage, nor turn).
       if (players.length === 0 && !gameInfo?.stage && !turnInfo) continue;
 
@@ -550,6 +598,100 @@ export class Classifier {
         players,
         ts: ev.ts,
       });
+    }
+  }
+
+  /**
+   * Milestone 23 (features e/f): "track winrate on cards whether I had
+   * them in opening hands or not" / "...if I played them during match" -
+   * traced against a real captured mulligan (2026-09-18/30, a single
+   * London mulligan down to 6): GameStateMessage.players[].pendingMessageType
+   * is "ClientMessageType_MulliganResp" while a seat's mulligan decision is
+   * pending; `zones` entries are whole-zone replacements (a changed zone's
+   * FULL new objectInstanceIds list, not an incremental delta); the
+   * post-bottom hand size is already reflected in the SAME diff that first
+   * carries a resolved `turnInfo.turnNumber` (turn 1 cannot begin while a
+   * decision is still pending), which is what makes "first turnNumber
+   * sighting" a safe freeze point for the real opening hand.
+   *
+   * State is reset ("fresh deal") whenever every player in `players` is
+   * simultaneously pending MulliganResp with no mulliganCount yet - the
+   * one real signal a brand-new game (1, 2, or 3 of a Bo3) just dealt
+   * everyone their first 7, independent of gameInfo.gameNumber's own
+   * sparse/unpredictable arrival timing (see ZoneGameState's own comment).
+   */
+  private classifyHandAndPlayedCards(ev: ClassifiableEvent, gsm: Record<string, unknown>, matchId: string, out: DomainEvent[]) {
+    const rawPlayers = Array.isArray(gsm.players) ? gsm.players.filter(isObj) : [];
+    const gameInfo = isObj(gsm.gameInfo) ? gsm.gameInfo : null;
+    const turnInfo = isObj(gsm.turnInfo) ? gsm.turnInfo : null;
+
+    const isFreshDeal =
+      rawPlayers.length >= 2 &&
+      rawPlayers.every((p) => p.pendingMessageType === "ClientMessageType_MulliganResp" && !p.mulliganCount);
+
+    let state = this.zoneStateByMatch.get(matchId);
+    if (!state || isFreshDeal) {
+      state = freshZoneGameState();
+      this.zoneStateByMatch.set(matchId, state);
+    }
+    if (typeof gameInfo?.gameNumber === "number") state.gameNumber = gameInfo.gameNumber;
+
+    if (Array.isArray(gsm.gameObjects)) {
+      for (const go of gsm.gameObjects) {
+        if (!isObj(go)) continue;
+        const instanceId = Number(go.instanceId);
+        const grpId = Number(go.grpId);
+        if (Number.isFinite(instanceId) && Number.isFinite(grpId)) state.grpIdByInstanceId.set(instanceId, grpId);
+      }
+    }
+
+    if (Array.isArray(gsm.zones)) {
+      for (const z of gsm.zones) {
+        if (!isObj(z) || z.type !== "ZoneType_Hand" || typeof z.ownerSeatId !== "number") continue;
+        const ownerSeat = z.ownerSeatId;
+        const newIds = new Set((Array.isArray(z.objectInstanceIds) ? z.objectInstanceIds : []).map(Number));
+        const previousIds = state.lastHandByOwnerSeat.get(ownerSeat);
+
+        // Only once this seat's opening hand has already been frozen below -
+        // a card "leaving" hand during the mulligan dance itself (shuffled
+        // away, replaced by a fresh redraw, or bottomed post-keep) is not a
+        // real play and must never be reported as one.
+        if (previousIds && state.openingHandResolvedSeats.has(ownerSeat)) {
+          for (const removedId of previousIds) {
+            if (newIds.has(removedId)) continue;
+            if (state.playedInstanceIdsEmitted.has(removedId)) continue;
+            const grpId = state.grpIdByInstanceId.get(removedId);
+            if (grpId === undefined) continue; // can't resolve this card's identity - skip rather than report an unknown play
+            state.playedInstanceIdsEmitted.add(removedId);
+            out.push({ kind: "CardPlayedInGame", matchId, gameNumber: state.gameNumber, seat: ownerSeat, grpId, ts: ev.ts } satisfies CardPlayedInGame);
+          }
+        }
+
+        state.lastHandByOwnerSeat.set(ownerSeat, newIds);
+      }
+    }
+
+    // Freeze the opening hand for any seat whose hand we've seen but
+    // haven't resolved yet, the first time real turn tracking appears -
+    // see this method's own comment for why that moment is safe.
+    if (typeof turnInfo?.turnNumber === "number") {
+      for (const [ownerSeat, handIds] of state.lastHandByOwnerSeat) {
+        if (state.openingHandResolvedSeats.has(ownerSeat)) continue;
+        state.openingHandResolvedSeats.add(ownerSeat);
+        const grpIds: number[] = [];
+        for (const id of handIds) {
+          const grpId = state.grpIdByInstanceId.get(id);
+          if (grpId !== undefined) grpIds.push(grpId);
+        }
+        // Only emitted when at least one card actually resolved - in
+        // practice this means only the player's OWN seat ever produces a
+        // real GameHandResolved (Arena never reveals the opponent's true
+        // hidden-hand identities to our client - see this event's own doc
+        // comment in types.ts).
+        if (grpIds.length > 0) {
+          out.push({ kind: "GameHandResolved", matchId, gameNumber: state.gameNumber, seat: ownerSeat, grpIds, ts: ev.ts } satisfies GameHandResolved);
+        }
+      }
     }
   }
 }

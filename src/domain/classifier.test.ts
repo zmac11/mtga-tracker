@@ -492,7 +492,210 @@ function run() {
   const payEntry = sealedJoin.find((e) => (e as any).source === "EventPayEntry") as any;
   assert.equal(payEntry.gems, -3000); // a cost, not a reward - negative on purpose
 
-  console.log("OK: classifier handled draft pack/pick/complete, match found/completed, game-state noise filtering, Bot Draft's combined pick+next-pack response, deck submission's real sideboard/format capture, EventGetCoursesV2 standings plus the generic EventCardPool capture from a course's CardPool, a synthetic 'Pick Two' (2 cards per pick) extension of both draft paths, EventClaimPrize's real captured reward shape (including its own CardPool capture, a RewardGrant emitted alongside it, and rejecting a SourceId that doesn't match the course for EventReward while RewardGrant still captures it), and RewardGrant's other three confirmed real sources (Mastery Pass tier reward via GraphProcessV2, plus Sealed's card-pool grant and entry-fee cost via EventJoin).");
+  // Milestone 23 (features e/f): GameHandResolved/CardPlayedInGame - built
+  // from the real traced mulligan sequence (2026-09-18/30, see
+  // classifier.ts's classifyHandAndPlayedCards comment): seat 2 mulligans
+  // once (fresh redraw of 7, then bottoms 1 down to 6), seat 1 keeps its
+  // first 7. Both seats' opening hands should freeze the instant
+  // turnInfo.turnNumber first appears - seat 1 at its original 7, seat 2 at
+  // its POST-bottom 6 (not the 7 it was just redrawn to, and never the
+  // original pre-mulligan 7 either). Neither the original pre-mulligan 7
+  // nor the bottomed-away card should ever be reported as "played".
+  function gameObject(instanceId: number, grpId: number) {
+    return { instanceId, grpId, zoneId: 1, type: "GameObjectType_Card", ownerSeatId: 1, controllerSeatId: 1 };
+  }
+
+  const hc = new Classifier();
+
+  // Initial deal: both seats dealt 7, both pending a mulligan decision, nobody has mulliganed yet.
+  const dealt = hc.classify({
+    direction: "unknown",
+    method: null,
+    ts: "h0",
+    json: {
+      greToClientEvent: {
+        greToClientMessages: [
+          {
+            type: "GREMessageType_GameStateMessage",
+            gameStateMessage: {
+              gameInfo: { matchID: "m-hand-1", gameNumber: 1 },
+              players: [
+                { systemSeatNumber: 1, pendingMessageType: "ClientMessageType_MulliganResp" },
+                { systemSeatNumber: 2, pendingMessageType: "ClientMessageType_MulliganResp" },
+              ],
+              zones: [
+                { zoneId: 11, type: "ZoneType_Hand", ownerSeatId: 1, objectInstanceIds: [1001, 1002, 1003, 1004, 1005, 1006, 1007] },
+                { zoneId: 12, type: "ZoneType_Hand", ownerSeatId: 2, objectInstanceIds: [2001, 2002, 2003, 2004, 2005, 2006, 2007] },
+              ],
+              gameObjects: [
+                gameObject(1001, 1), gameObject(1002, 2), gameObject(1003, 3), gameObject(1004, 4),
+                gameObject(1005, 5), gameObject(1006, 6), gameObject(1007, 7),
+                gameObject(2001, 101), gameObject(2002, 102), gameObject(2003, 103), gameObject(2004, 104),
+                gameObject(2005, 105), gameObject(2006, 106), gameObject(2007, 107),
+              ],
+            },
+          },
+        ],
+      },
+    },
+  });
+  assert.equal(dealt.filter((e) => e.kind === "GameHandResolved" || e.kind === "CardPlayedInGame").length, 0); // nothing frozen/played yet
+
+  // Seat 2 mulligans once - fresh redraw of 7 DIFFERENT cards, still pending (deciding whether to keep this new 7 or mulligan again).
+  const redraw = hc.classify({
+    direction: "unknown",
+    method: null,
+    ts: "h1",
+    json: {
+      greToClientEvent: {
+        greToClientMessages: [
+          {
+            type: "GREMessageType_GameStateMessage",
+            gameStateMessage: {
+              players: [{ systemSeatNumber: 2, pendingMessageType: "ClientMessageType_MulliganResp", mulliganCount: 1 }],
+              zones: [{ zoneId: 12, type: "ZoneType_Hand", ownerSeatId: 2, objectInstanceIds: [3001, 3002, 3003, 3004, 3005, 3006, 3007] }],
+              gameObjects: [
+                gameObject(3001, 201), gameObject(3002, 202), gameObject(3003, 203), gameObject(3004, 204),
+                gameObject(3005, 205), gameObject(3006, 206), gameObject(3007, 207),
+              ],
+            },
+          },
+        ],
+      },
+    },
+  });
+  assert.equal(redraw.filter((e) => e.kind === "GameHandResolved" || e.kind === "CardPlayedInGame").length, 0); // still mid-mulligan, nothing frozen/played
+
+  // Seat 2 keeps this new 7 (pending clears); seat 2 keeps mulliganCount: 1.
+  const kept = hc.classify({
+    direction: "unknown",
+    method: null,
+    ts: "h2",
+    json: {
+      greToClientEvent: {
+        greToClientMessages: [
+          { type: "GREMessageType_GameStateMessage", gameStateMessage: { players: [{ systemSeatNumber: 2, mulliganCount: 1 }] } },
+        ],
+      },
+    },
+  });
+  assert.equal(kept.filter((e) => e.kind === "GameHandResolved" || e.kind === "CardPlayedInGame").length, 0); // locking in mulligan emits a GameStateSnapshot (pre-existing behavior) but nothing hand/play-related yet
+
+  // Turn 1 begins - in the SAME diff, seat 2's hand is bottomed from 7 down
+  // to 6 (drops grpId 207/instanceId 3007). Both seats' opening hands
+  // should freeze here: seat 1 at its original 7, seat 2 at its bottomed 6
+  // (201-206, NOT 207, and NOT any of the original mulliganed-away 101-107).
+  const turn1Json = {
+    greToClientEvent: {
+      greToClientMessages: [
+        {
+          type: "GREMessageType_GameStateMessage",
+          gameStateMessage: {
+            turnInfo: { phase: "Phase_Beginning", step: "Step_Upkeep", turnNumber: 1, activePlayer: 1, decisionPlayer: 1 },
+            zones: [{ zoneId: 12, type: "ZoneType_Hand", ownerSeatId: 2, objectInstanceIds: [3001, 3002, 3003, 3004, 3005, 3006] }],
+          },
+        },
+      ],
+    },
+  };
+  const turn1 = hc.classify({ direction: "unknown", method: null, ts: "h3", json: turn1Json });
+  const seat1Hand = turn1.find((e) => e.kind === "GameHandResolved" && (e as any).seat === 1) as any;
+  const seat2Hand = turn1.find((e) => e.kind === "GameHandResolved" && (e as any).seat === 2) as any;
+  assert.deepEqual([...seat1Hand.grpIds].sort((a: number, b: number) => a - b), [1, 2, 3, 4, 5, 6, 7]);
+  assert.deepEqual([...seat2Hand.grpIds].sort((a: number, b: number) => a - b), [201, 202, 203, 204, 205, 206]); // bottomed hand, not the redraw's 7 or the original mulliganed-away 101-107
+  assert.equal(seat1Hand.gameNumber, 1);
+  assert.equal(seat2Hand.gameNumber, 1);
+  // Critically: bottoming 207 away, and mulliganing the original 101-107
+  // away, must NEVER be reported as "played".
+  assert.equal(turn1.filter((e) => e.kind === "CardPlayedInGame").length, 0);
+  // And freezing is one-time - replaying the exact same message again must not re-fire it.
+  const turn1Again = hc.classify({ direction: "unknown", method: null, ts: "h3b", json: turn1Json });
+  assert.equal(turn1Again.filter((e) => e.kind === "GameHandResolved").length, 0);
+
+  // Later, seat 2 actually casts a card (grpId 201/instanceId 3001) - NOW it should be reported as played.
+  const played = hc.classify({
+    direction: "unknown",
+    method: null,
+    ts: "h4",
+    json: {
+      greToClientEvent: {
+        greToClientMessages: [
+          {
+            type: "GREMessageType_GameStateMessage",
+            gameStateMessage: {
+              turnInfo: { phase: "Phase_Main1", turnNumber: 1, activePlayer: 1, decisionPlayer: 2 },
+              zones: [{ zoneId: 12, type: "ZoneType_Hand", ownerSeatId: 2, objectInstanceIds: [3002, 3003, 3004, 3005, 3006] }],
+            },
+          },
+        ],
+      },
+    },
+  });
+  const playedCardEvents = played.filter((e) => e.kind === "CardPlayedInGame");
+  assert.equal(playedCardEvents.length, 1); // alongside this, the turnInfo in this diff also emits an (expected, pre-existing) GameStateSnapshot
+  assert.equal((playedCardEvents[0] as any).grpId, 201);
+  assert.equal((playedCardEvents[0] as any).seat, 2);
+  assert.equal((playedCardEvents[0] as any).matchId, "m-hand-1");
+  // Playing the same card's instanceId again (shouldn't happen, but guards against double-reporting) is a no-op.
+  const playedAgain = hc.classify({
+    direction: "unknown",
+    method: null,
+    ts: "h4b",
+    json: {
+      greToClientEvent: {
+        greToClientMessages: [
+          { type: "GREMessageType_GameStateMessage", gameStateMessage: { zones: [{ zoneId: 12, type: "ZoneType_Hand", ownerSeatId: 2, objectInstanceIds: [3002, 3003, 3004, 3005, 3006] }] } },
+        ],
+      },
+    },
+  });
+  assert.equal(playedAgain.filter((e) => e.kind === "CardPlayedInGame").length, 0);
+
+  // A fresh deal for a SECOND game (gameNumber 2, same match - Bo3) must
+  // reset tracking entirely, not carry game 1's already-frozen state
+  // forward - both seats' opening hands should freeze again for the new game.
+  const game2Dealt = hc.classify({
+    direction: "unknown",
+    method: null,
+    ts: "h5",
+    json: {
+      greToClientEvent: {
+        greToClientMessages: [
+          {
+            type: "GREMessageType_GameStateMessage",
+            gameStateMessage: {
+              gameInfo: { matchID: "m-hand-1", gameNumber: 2 },
+              players: [
+                { systemSeatNumber: 1, pendingMessageType: "ClientMessageType_MulliganResp" },
+                { systemSeatNumber: 2, pendingMessageType: "ClientMessageType_MulliganResp" },
+              ],
+              zones: [{ zoneId: 21, type: "ZoneType_Hand", ownerSeatId: 1, objectInstanceIds: [9001, 9002] }],
+              gameObjects: [gameObject(9001, 301), gameObject(9002, 302)],
+            },
+          },
+        ],
+      },
+    },
+  });
+  assert.equal(game2Dealt.filter((e) => e.kind === "GameHandResolved").length, 0); // mid-mulligan again, nothing frozen yet
+  const game2Turn1 = hc.classify({
+    direction: "unknown",
+    method: null,
+    ts: "h6",
+    json: {
+      greToClientEvent: {
+        greToClientMessages: [
+          { type: "GREMessageType_GameStateMessage", gameStateMessage: { turnInfo: { turnNumber: 1, activePlayer: 1, decisionPlayer: 1 } } },
+        ],
+      },
+    },
+  });
+  const game2Seat1Hand = game2Turn1.find((e) => e.kind === "GameHandResolved" && (e as any).seat === 1) as any;
+  assert.ok(game2Seat1Hand); // game 2's own opening hand froze independently of game 1's already-resolved state
+  assert.deepEqual([...game2Seat1Hand.grpIds].sort((a: number, b: number) => a - b), [301, 302]);
+  assert.equal(game2Seat1Hand.gameNumber, 2);
+
+  console.log("OK: classifier handled draft pack/pick/complete, match found/completed, game-state noise filtering, Bot Draft's combined pick+next-pack response, deck submission's real sideboard/format capture, EventGetCoursesV2 standings plus the generic EventCardPool capture from a course's CardPool, a synthetic 'Pick Two' (2 cards per pick) extension of both draft paths, EventClaimPrize's real captured reward shape (including its own CardPool capture, a RewardGrant emitted alongside it, and rejecting a SourceId that doesn't match the course for EventReward while RewardGrant still captures it), RewardGrant's other three confirmed real sources (Mastery Pass tier reward via GraphProcessV2, plus Sealed's card-pool grant and entry-fee cost via EventJoin), and (milestone 23) GameHandResolved/CardPlayedInGame from a real-traced mulligan/bottom/play sequence, including a second game of the same match resetting tracking independently.");
 }
 
 run();

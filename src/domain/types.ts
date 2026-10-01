@@ -190,6 +190,64 @@ export interface MatchCompleted {
   ts: string;
 }
 
+/**
+ * Milestone 23 (features e/f): the resolved, fully-bottomed (post-mulligan)
+ * opening hand for ONE SEAT in one game - every grpId that seat's Hand zone
+ * held the moment real turn play began (the first GameStateMessage diff to
+ * carry a resolved `turnInfo.turnNumber`, confirmed real 2026-09-18/30 to
+ * already include that game's own mulligan-bottoming ZoneTransfer in the
+ * SAME diff - see classifier.ts's classifyGreGameState for the full trace
+ * this was built from).
+ *
+ * Deliberately carries `seat`, not "mine"/"opponent's" - same convention
+ * as GameStateSnapshot.players (classifier.ts stays Arena-protocol-literal,
+ * with no notion of "me" baked in); a consumer resolves which seat is the
+ * player's own the same way matchDetails.ts already does (MatchFound +
+ * myScreenName -> systemSeatId). In practice this is only ever emitted for
+ * the player's OWN seat - Arena's client never reveals the opponent's real
+ * hidden-hand card identities, so an opposing seat's hand zone never has
+ * resolvable grpIds to emit (see classifyGreGameState).
+ *
+ * Best-effort/not yet validated against a real multi-mulligan-vs-
+ * simultaneous-mulligan edge case or a real Bo3 (same caveat this project
+ * already carries for other first-of-their-kind captures, e.g. "Pick Two"
+ * draft) - the "fresh deal" reset this relies on (see classifier.ts) has
+ * only been traced against real single-mulligan Bo1 games so far.
+ */
+export interface GameHandResolved {
+  kind: "GameHandResolved";
+  matchId: string;
+  /** Null if gameInfo.gameNumber never arrived for this game (capture gap) - see classifier.ts. */
+  gameNumber: number | null;
+  seat: number;
+  grpIds: number[];
+  ts: string;
+}
+
+/**
+ * Milestone 23 (feature f): one card that left its owner's Hand zone during
+ * a game - cast, played as a land, discarded, or otherwise - confirmed real
+ * from the same captured zones/annotations trace as GameHandResolved above
+ * (a `ZoneType_Hand` zone's `objectInstanceIds` losing an id it previously
+ * had). Deliberately scoped to "left hand by any means", not just "cast
+ * successfully" - the raw zone-transfer data doesn't distinguish a cast
+ * from a discard, and narrowing that further isn't worth the risk of
+ * getting it wrong; see this event's own doc comment for the full
+ * rationale. Only emitted once mulligan decisions for that seat have
+ * resolved (GameHandResolved already fired for it) - a card leaving the
+ * PRE-mulligan hand during the mulligan dance itself (shuffled away,
+ * replaced by a fresh redraw) is not "played" and is deliberately not
+ * reported here.
+ */
+export interface CardPlayedInGame {
+  kind: "CardPlayedInGame";
+  matchId: string;
+  gameNumber: number | null;
+  seat: number;
+  grpId: number;
+  ts: string;
+}
+
 export interface PlayerIdentified {
   kind: "PlayerIdentified";
   screenName: string;
@@ -356,4 +414,6 @@ export type DomainEvent =
   | CourseStanding
   | EventReward
   | EventCardPool
-  | RewardGrant;
+  | RewardGrant
+  | GameHandResolved
+  | CardPlayedInGame;
