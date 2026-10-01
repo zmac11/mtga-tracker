@@ -1,39 +1,12 @@
-import { readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-import { locateLogFile } from "./log/logLocator.js";
-import { LogParser, type RawBlock } from "./log/logParser.js";
-import { Classifier, type ClassifiableEvent } from "./domain/classifier.js";
-import { RawEventStore } from "./db/store.js";
-import { TypedEventStore } from "./db/sqliteStore.js";
-import type { DomainEvent } from "./domain/types.js";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
+import { CapturePipeline } from "./pipeline.js";
 
 /**
- * Backfills matches that happened while the tracker wasn't running, by
- * replaying MTG Arena's own current Player.log (not raw-events.jsonl -
- * see backfill.ts for that, a different job) through a fresh classifier
- * and keeping only the events for matches not already in tracker.db.
- *
- * Why replay the WHOLE current log instead of just the new tail: the
- * classifier is stateful (mulligan/hand tracking, turn counters) and
- * expects to see a match's events in order from its own start - splicing
- * in only "new" bytes risks misclassifying the first event(s) of a match
- * that spans the gap. Replaying everything and filtering by matchId
- * afterwards is safe either way because it's filtered, not appended,
- * against what's already stored: already-known matchIds are skipped
- * entirely, so nothing already captured gets duplicated.
- *
- * Only events carrying a matchId are considered (MatchFound,
- * MatchCompleted, GameStateSnapshot, GameHandResolved, CardPlayedInGame) -
- * this is deliberately scoped to "recover missed matches", not a general
- * re-sync tool.
+ * Manual CLI entry point for CapturePipeline.catchUpFromLog() - milestone
+ * 25 wired the same method into Electron app startup so this now happens
+ * automatically every launch, but this script is kept for running it by
+ * hand (e.g. --dry-run to preview, or pointing at a non-default log/data
+ * location) without starting the whole app.
  */
-function hasMatchId(e: DomainEvent): e is DomainEvent & { matchId: string } {
-  return typeof (e as unknown as { matchId?: unknown }).matchId === "string";
-}
-
 function parseArgs(argv: string[]) {
   const args: { logPath?: string; dataDir?: string; dryRun: boolean } = { dryRun: false };
   for (let i = 0; i < argv.length; i++) {
@@ -44,78 +17,32 @@ function parseArgs(argv: string[]) {
   return args;
 }
 
-function main() {
-  const { logPath, dataDir: dataDirArg, dryRun } = parseArgs(process.argv.slice(2));
-  const dataDir = dataDirArg ?? join(__dirname, "..", "data");
-  const located = locateLogFile(logPath);
+async function main() {
+  const { logPath, dataDir, dryRun } = parseArgs(process.argv.slice(2));
+  const pipeline = new CapturePipeline({ logPath, dataDir });
 
-  if (!located.found) {
-    console.error(`Could not find Player.log. Checked:\n  ${located.checked.join("\n  ")}`);
+  if (!pipeline.located.found) {
+    console.error(`Could not find Player.log. Checked:\n  ${pipeline.located.checked.join("\n  ")}`);
     process.exitCode = 1;
     return;
   }
 
-  console.log(`Reading full log from: ${located.path}`);
-  const fullText = readFileSync(located.path, "utf8");
+  console.log(`Reading full log from: ${pipeline.located.path}`);
+  const result = pipeline.catchUpFromLog({ dryRun });
 
-  const parser = new LogParser();
-  const classifier = new Classifier();
-  const blocks: Array<{ block: RawBlock; events: DomainEvent[] }> = [];
-
-  parser.on("block", (block: RawBlock) => {
-    const ev: ClassifiableEvent = {
-      direction: block.direction,
-      method: block.methodGuess,
-      json: block.json,
-      ts: block.timestampGuess ?? new Date().toISOString(),
-    };
-    const events = classifier.classify(ev);
-    blocks.push({ block, events });
-  });
-  parser.feed(fullText);
-
-  console.log(`Parsed ${blocks.length} raw blocks from the log.`);
-
-  const typedStore = new TypedEventStore(join(dataDir, "tracker.db"));
-  const existingMatchIds = new Set(typedStore.all("MatchFound").map((e) => e.matchId));
-
-  const freshMatchIds = new Set<string>();
-  for (const { events } of blocks) {
-    for (const e of events) {
-      if (hasMatchId(e) && !existingMatchIds.has(e.matchId)) freshMatchIds.add(e.matchId);
-    }
-  }
-
-  if (freshMatchIds.size === 0) {
+  if (result.newMatchIds.length === 0) {
     console.log("No new matches found in the current log - everything here is already in tracker.db.");
-    typedStore.close();
-    return;
-  }
+  } else {
+    console.log(`Found ${result.newMatchIds.length} match(es) not yet in tracker.db:`);
+    for (const id of result.newMatchIds) console.log(`  ${id}`);
 
-  console.log(`Found ${freshMatchIds.size} match(es) not yet in tracker.db:`);
-  for (const id of freshMatchIds) console.log(`  ${id}`);
-
-  const rawStore = dryRun ? null : new RawEventStore(dataDir);
-  let appendedEvents = 0;
-  const kindCounts = new Map<string, number>();
-
-  for (const { block, events } of blocks) {
-    const keep = events.some((e) => hasMatchId(e) && freshMatchIds.has(e.matchId));
-    if (!keep) continue;
-    if (!dryRun) {
-      rawStore!.append(block, new Date());
-      typedStore.appendMany(events);
+    console.log(`\n${dryRun ? "[dry run] Would append" : "Appended"} ${result.appendedEvents} event(s):`);
+    for (const [kind, count] of Object.entries(result.kindCounts).sort((a, b) => b[1] - a[1])) {
+      console.log(`  ${String(count).padStart(4, " ")}  ${kind}`);
     }
-    for (const e of events) kindCounts.set(e.kind, (kindCounts.get(e.kind) ?? 0) + 1);
-    appendedEvents += events.length;
   }
 
-  console.log(`\n${dryRun ? "[dry run] Would append" : "Appended"} ${appendedEvents} event(s):`);
-  for (const [kind, count] of [...kindCounts.entries()].sort((a, b) => b[1] - a[1])) {
-    console.log(`  ${String(count).padStart(4, " ")}  ${kind}`);
-  }
-
-  typedStore.close();
+  await pipeline.stop();
 }
 
 main();

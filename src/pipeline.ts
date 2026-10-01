@@ -1,5 +1,6 @@
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
 import { EventEmitter } from "node:events";
 import { locateLogFile, type LocateResult } from "./log/logLocator.js";
 import { LogTailer } from "./log/logTailer.js";
@@ -7,6 +8,7 @@ import { LogParser, type RawBlock } from "./log/logParser.js";
 import { RawEventStore } from "./db/store.js";
 import { TypedEventStore } from "./db/sqliteStore.js";
 import { Classifier } from "./domain/classifier.js";
+import { selectNewMatchEvents, type ClassifiedBlock } from "./domain/catchUp.js";
 import type { DomainEvent } from "./domain/types.js";
 
 export interface ProcessedBlock {
@@ -33,6 +35,13 @@ export interface CapturePipelineOptions {
   fromStart?: boolean;
   /** Defaults to <project root>/data. */
   dataDir?: string;
+}
+
+export interface CatchUpResult {
+  /** matchIds recovered that weren't already in tracker.db - empty if nothing was missed. */
+  newMatchIds: string[];
+  appendedEvents: number;
+  kindCounts: Record<string, number>;
 }
 
 /**
@@ -131,6 +140,66 @@ export class CapturePipeline extends EventEmitter {
       ...this.typedStore.all("DraftPickMade"),
       ...this.typedStore.all("DraftCompleted"),
     ];
+  }
+
+  /**
+   * Milestone 25: "tracker was off for a bit, recover whatever matches
+   * happened while it was" - replays the WHOLE current Player.log (not
+   * just whatever the live tailer would see from here on) through a
+   * one-shot parser+classifier, then keeps only the matches that aren't
+   * already in tracker.db (see domain/catchUp.ts/selectNewMatchEvents for
+   * the actual selection logic - this method is just the I/O around it).
+   *
+   * Call this before start() (and before seeding any live state from
+   * historyForSeeding(), if the caller does that) so a relaunch's very
+   * first render already reflects whatever got recovered. Safe to call on
+   * every single startup, found-or-not: a no-op if Player.log wasn't
+   * found, and already-known matches are always skipped rather than
+   * re-appended, so there's no harm (beyond the one-time cost of
+   * reclassifying the log) in doing this unconditionally rather than only
+   * when the caller suspects something was missed. Only recovers whole
+   * matches (anything carrying a matchId) - see that module's comment for
+   * why this is deliberately narrower than a general re-sync.
+   *
+   * Relies on Arena not having been relaunched since the missed match(es)
+   * - it rewrites Player.log from scratch on every client (re)start (see
+   * LogTailer's own comment), so anything from before that rewrite is
+   * gone from the file and simply won't be found here.
+   */
+  catchUpFromLog(opts: { dryRun?: boolean } = {}): CatchUpResult {
+    if (!this.located.found) return { newMatchIds: [], appendedEvents: 0, kindCounts: {} };
+
+    const fullText = readFileSync(this.located.path, "utf8");
+    const parser = new LogParser();
+    const classifier = new Classifier();
+    const blocks: ClassifiedBlock[] = [];
+    parser.on("block", (block: RawBlock) => {
+      const events = classifier.classify({
+        direction: block.direction,
+        method: block.methodGuess,
+        json: block.json,
+        ts: block.timestampGuess ?? new Date().toISOString(),
+      });
+      blocks.push({ block, events });
+    });
+    parser.feed(fullText);
+
+    const existingMatchIds = new Set(this.typedStore.all("MatchFound").map((e) => e.matchId));
+    const { newMatchIds, toAppend } = selectNewMatchEvents(blocks, existingMatchIds);
+
+    const kindCounts: Record<string, number> = {};
+    let appendedEvents = 0;
+    for (const { block, events } of toAppend) {
+      if (!opts.dryRun) {
+        this.rawStore.append(block, new Date());
+        this.typedStore.appendMany(events);
+        for (const e of events) this.emit("domainEvent", e);
+      }
+      for (const e of events) kindCounts[e.kind] = (kindCounts[e.kind] ?? 0) + 1;
+      appendedEvents += events.length;
+    }
+
+    return { newMatchIds, appendedEvents, kindCounts };
   }
 
   /** Only meaningful once `located.found` is true. */

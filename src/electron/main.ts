@@ -934,6 +934,36 @@ app.whenReady().then(() => {
   const { logPath: argvLogPath, fromStart } = parseArgs(process.argv.slice(2));
   const logPath = argvLogPath ?? overlaySettings.customLogPath ?? undefined;
   const pipeline = new CapturePipeline({ logPath, fromStart, dataDir: resolvePipelineDataDir() });
+
+  // Milestone 25: "I missed a few matches because the tracker was off -
+  // can it check for that on startup?" Runs on every launch, found-or-not:
+  // a no-op if Player.log isn't there, and matches already in tracker.db
+  // are always skipped rather than re-appended (see
+  // CapturePipeline.catchUpFromLog's own comment), so there's no harm in
+  // doing this unconditionally rather than guessing whether something was
+  // missed. Deliberately happens before seedHistory() below, so a relaunch
+  // right after a gap shows the recovered match(es) from its very first
+  // render instead of needing a second relaunch.
+  try {
+    const caughtUp = pipeline.catchUpFromLog();
+    if (caughtUp.newMatchIds.length > 0) {
+      console.log(`Recovered ${caughtUp.newMatchIds.length} match(es) missed while the tracker was off: ${caughtUp.newMatchIds.join(", ")}`);
+      if (Notification.isSupported()) {
+        new Notification({
+          title: "MTGA Tracker",
+          body:
+            caughtUp.newMatchIds.length === 1
+              ? "Recovered 1 match from the log that was missed while the tracker was off."
+              : `Recovered ${caughtUp.newMatchIds.length} matches from the log that were missed while the tracker was off.`,
+        }).show();
+      }
+    }
+  } catch (err) {
+    // Best-effort recovery feature - never let it block the app from
+    // starting its normal live capture below.
+    console.error("Catch-up from log failed:", err);
+  }
+
   const liveState = new LiveStateTracker();
   // Rebuild win-rate/event-record history from previous runs before we ever
   // show anything - otherwise a relaunch shows every event's record as blank
