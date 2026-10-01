@@ -354,7 +354,7 @@ let overlaySettings: OverlaySettings = {
 // closure captured directly by the tray's click handlers) so
 // rebuildTrayMenu() can stay a plain top-level function like the rest of
 // this file's UI wiring.
-let runCardRefresh: ((skipEnrich: boolean) => void) | null = null;
+let runCardRefresh: ((skipEnrich: boolean, forceRefresh?: boolean) => void) | null = null;
 // Milestone 19: same "module-level slot" pattern as runCardRefresh above -
 // openPastEventsPage is defined inside app.whenReady() (it needs pipeline/
 // overlaySettings, only available there), but rebuildTrayMenu() is a
@@ -805,6 +805,28 @@ function rebuildTrayMenu(): void {
       enabled: !refreshingCards,
       click: () => runCardRefresh?.(true),
     },
+    {
+      /**
+       * Milestone 23 (user-reported bug, 2026-10-01): "game does not load
+       * scryfall card data from newest set" - root cause found while
+       * investigating a real example (Campus Crier, set FRA/"Reality
+       * Fracture", which released on Arena right around this same date -
+       * see scryfallEnrich.ts's cache comment). "Refresh Card Database"
+       * above (runCardRefresh(false)) always calls enrichCards with NO
+       * forceRefresh, so it silently re-scans the existing local Scryfall
+       * cache whenever that cache is under 20 hours old (isCacheFresh) -
+       * exactly the case for anyone who had already refreshed recently
+       * (including during a set's prerelease period) before the new set's
+       * cards actually showed up in Scryfall's own default_cards snapshot.
+       * There was previously no way to force a real re-download from the
+       * tray at all - only refreshCards.ts's CLI script ever exposed
+       * --force-refresh. This item is that same option, now reachable
+       * without a terminal.
+       */
+      label: "Force Refresh from Scryfall (ignore cache)",
+      enabled: !refreshingCards,
+      click: () => runCardRefresh?.(false, true),
+    },
     { type: "separator" },
     { label: `MTGA Tracker v${app.getVersion()}`, enabled: false },
     ...(updateCheckStatus?.updateAvailable && updateCheckStatus.latestVersion
@@ -933,7 +955,7 @@ app.whenReady().then(() => {
   // at a time (a second click while one's in flight is a no-op, and the
   // menu item is disabled/relabeled while running so this is also visible,
   // not just silently ignored).
-  runCardRefresh = async (skipEnrich: boolean) => {
+  runCardRefresh = async (skipEnrich: boolean, forceRefresh = false) => {
     if (refreshingCards) return;
     refreshingCards = true;
     rebuildTrayMenu();
@@ -957,7 +979,11 @@ app.whenReady().then(() => {
       }
 
       try {
-        const { matchedCount, cards, downloaded } = await enrichCards(arenaCards, { dataDir: pipeline.dataDir });
+        // forceRefresh bypasses isCacheFresh's 20-hour window entirely -
+        // see the "Force Refresh from Scryfall" tray item's own comment
+        // for why this needed its own button rather than relying on the
+        // normal refresh ever reaching Scryfall again on its own.
+        const { matchedCount, cards, downloaded } = await enrichCards(arenaCards, { dataDir: pipeline.dataDir, forceRefresh });
         store.upsertMany(cards);
         const summary = `Synced ${arenaCards.length} cards, ${matchedCount} enriched from Scryfall (${downloaded ? "fresh download" : "cached data"}).`;
         cardRefreshStatus = { at: new Date().toISOString(), summary };
