@@ -548,9 +548,18 @@ function draftPickHtml(entry: DraftViewerPick): string {
   const pickedSet = new Set(entry.pickedCardIds);
   const takenNote = entry.pickedCardIds.length === 1 ? "" : ` <span class="muted">(${entry.pickedCardIds.length} cards taken this pick)</span>`;
 
+  // Milestone 23 (feature c): same "how much competition was this picked
+  // under" read as domain/draftPickPriority.ts's aggregate metric (feature
+  // b), just computed locally for this ONE pick instead of averaged across
+  // every draft - "how that draft was going" at this exact moment, not a
+  // dataset-wide trend. Derived straight from fields this interface
+  // already carries, no new data plumbing needed.
+  const others = Math.max(0, entry.packCards.length - entry.pickedCardIds.length);
+  const priorityNote = ` <span class="muted priority-note">(picked over ${others} other${others === 1 ? "" : "s"})</span>`;
+
   return `
     <section class="draft-pick">
-      <h3>Pack ${entry.pack}, Pick ${entry.pick}${takenNote} <span class="muted">(${entry.packCards.length} card${entry.packCards.length === 1 ? "" : "s"} offered)</span></h3>
+      <h3>Pack ${entry.pack}, Pick ${entry.pick}${takenNote} <span class="muted">(${entry.packCards.length} card${entry.packCards.length === 1 ? "" : "s"} offered)</span>${priorityNote}</h3>
       <ul class="card-list draft-card-list">
         ${entry.packCards.map((c) => draftPickCardHtml(c, pickedSet.has(c.cardId))).join("")}
       </ul>

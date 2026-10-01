@@ -190,6 +190,11 @@ function run() {
   assert.ok(withDraft.includes("Did not wheel back")); // pick 2's no-wheel case
   // The picked card gets the "picked" styling hook.
   assert.ok(/draft-card-row picked/.test(withDraft));
+  // Milestone 23 (feature c): per-pick "picked over N others" note - pick 1
+  // had 2 cards offered and 1 taken (1 other), pick 2 had 1 card offered and
+  // 1 taken (0 others - it was the only option).
+  assert.ok(withDraft.includes("(picked over 1 other)"));
+  assert.ok(withDraft.includes("(picked over 0 others)"));
 
   // "Pick Two" draft (2 cards taken in one pick - see types.ts's
   // DraftPickMade.grpIds comment): both taken cards get the "picked" hook,
@@ -211,6 +216,9 @@ function run() {
   const withPickTwo = generateDeckViewerHtml({ ...data, draft: pickTwoPicks });
   assert.equal((withPickTwo.match(/draft-card-row picked/g) ?? []).length, 2);
   assert.ok(withPickTwo.includes("2 cards taken this pick"));
+  // 3 cards offered, 2 taken (via "Pick Two") - 1 other left, not 2 (the
+  // priority note subtracts every card taken this pick, not just one).
+  assert.ok(withPickTwo.includes("(picked over 1 other)"));
 
   // Milestone 17: header extras - avg mana value, entry cost, reward - only
   // render when actually passed, and are otherwise silently omitted rather
