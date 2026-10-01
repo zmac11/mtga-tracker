@@ -1,6 +1,6 @@
 import type { TypedEventStore } from "./db/sqliteStore.js";
 import type { EventHistorySource } from "./domain/eventHistory.js";
-import type { CardPlayedInGame, DraftPickMade, GameHandResolved } from "./domain/types.js";
+import type { CardPlayedInGame, DraftPickMade, GameHandResolved, ManualCourseResult } from "./domain/types.js";
 // GameStateSnapshot has no replayed-log dedup concern worth adding here -
 // see the note next to where it's read below.
 
@@ -78,6 +78,12 @@ export function loadEventHistorySource(store: TypedEventStore): EventHistorySour
   // seen per game, so a replayed-log duplicate snapshot is harmless (same
   // value seen twice changes nothing).
   const gameStateSnapshots = store.all("GameStateSnapshot");
+  // Milestone 25: manual event-closure corrections - see ManualCourseResult's
+  // doc comment in types.ts. Never written by a replayed log (these are
+  // user-input only, not classified), so no "replayed log" dedup concern
+  // like the sources above - but a courseId+ts key is still a safe natural
+  // key in case the same row is ever read twice for some other reason.
+  const manualResults: ManualCourseResult[] = dedupeBy(store.all("ManualCourseResult"), (m) => `${m.eventId}|${m.courseId ?? ""}|${m.ts}`);
 
-  return { decks, completions, picks, packsSeen, matchFounds, matchCompletions, courseStandings, joins, rewards, cardPools, rewardGrants, handEvents, playedEvents, gameStateSnapshots, myScreenName };
+  return { decks, completions, picks, packsSeen, matchFounds, matchCompletions, courseStandings, joins, rewards, cardPools, rewardGrants, handEvents, playedEvents, gameStateSnapshots, manualResults, myScreenName };
 }

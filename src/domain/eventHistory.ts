@@ -1,5 +1,5 @@
-import type { DraftPackSeen, DraftPickMade, DeckSubmitted, DraftCompleted, MatchFound, MatchCompleted, CourseStanding, DraftJoined, EventReward, EventCardPool, RewardGrant, GameHandResolved, CardPlayedInGame, GameStateSnapshot } from "./types.js";
-import { computeMatchOutcomes, latestStandingByEvent, reconcileWinRate, winRate, type MatchOutcome, type WinRate } from "./rollups.js";
+import type { DraftPackSeen, DraftPickMade, DeckSubmitted, DraftCompleted, MatchFound, MatchCompleted, CourseStanding, DraftJoined, EventReward, EventCardPool, RewardGrant, GameHandResolved, CardPlayedInGame, GameStateSnapshot, ManualCourseResult } from "./types.js";
+import { computeMatchOutcomes, latestStandingByEvent, reconcileWinRate, winRate, winRateFromCounts, type MatchOutcome, type WinRate } from "./rollups.js";
 import { parseEventIdentity, resolveEventFormat, type EventIdentity, type EventFormat } from "./eventIdentity.js";
 import { deriveDeckVersions, type DeckVersion } from "./deckVersions.js";
 import { buildCourseWindows, assignCourseId, compareTs, type CourseWindow } from "./courseRuns.js";
@@ -154,6 +154,14 @@ export interface EventHistorySource {
    * source here.
    */
   gameStateSnapshots: GameStateSnapshot[];
+  /**
+   * Milestone 25: user-entered corrections for runs the tracker's own
+   * detection never saw reach a final state - see ManualCourseResult's
+   * doc comment in types.ts and domain/eventClosure.ts. NOT pre-filtered;
+   * buildEventRunHistory looks up the one (if any) for its own
+   * (eventId, courseId) itself, same convention as courseStandings.
+   */
+  manualResults: ManualCourseResult[];
   myScreenName: string | null;
 }
 
@@ -173,7 +181,7 @@ function dedupeLatestByKey<T>(items: T[], keyFn: (item: T) => string): T[] {
  * so a normal event (one courseId, or literally zero signal at all) is
  * completely unaffected by any of this.
  */
-function courseWindowsForEvent(eventId: string, source: EventHistorySource): CourseWindow[] {
+export function courseWindowsForEvent(eventId: string, source: EventHistorySource): CourseWindow[] {
   const signals: Array<{ courseId: string; ts: string }> = [
     ...source.courseStandings.filter((s) => s.eventId === eventId).map((s) => ({ courseId: s.courseId, ts: s.ts })),
     ...source.completions.filter((c) => c.eventName === eventId).map((c) => ({ courseId: c.courseId, ts: c.ts })),
@@ -294,6 +302,16 @@ export function buildEventRunHistory(eventId: string, source: EventHistorySource
   const standingsForRun = source.courseStandings.filter((s) => s.eventId === eventId && matchesCourseId(s));
   const standing = standingsForRun.length > 0 ? [...standingsForRun].sort((a, b) => compareTs(a.ts, b.ts)).at(-1)! : (latestStandingByEvent(source.courseStandings).get(eventId) ?? null);
 
+  // Milestone 25: a user-entered manual correction (see types.ts's
+  // ManualCourseResult) always wins outright - it exists specifically
+  // because the automatic record (local capture AND Arena's own
+  // CourseStanding alike) was wrong or missing for this run, so this is
+  // NOT reconciled by taking a max like the local-vs-Arena case below;
+  // the user's entered score simply replaces whatever would otherwise be
+  // computed, the same way Arena's own "Complete" standing normally would
+  // have been the final word if capture hadn't missed it.
+  const manualResult = source.manualResults.find((m) => m.eventId === eventId && (courseId == null || m.courseId === courseId)) ?? null;
+
   // Milestone 17: per-version breakdown, built from the FULL submission
   // history for this run (not just the latest) plus this run's matches -
   // see deckVersions.ts. Deliberately independent of the `deck`/`winRate`
@@ -324,7 +342,7 @@ export function buildEventRunHistory(eventId: string, source: EventHistorySource
     picks,
     packsSeen,
     matches,
-    winRate: reconcileWinRate(winRate(matches), standing),
+    winRate: manualResult ? winRateFromCounts(manualResult.wins, manualResult.losses) : reconcileWinRate(winRate(matches), standing),
     deckVersions,
     entry,
     reward,

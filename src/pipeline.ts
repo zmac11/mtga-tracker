@@ -9,6 +9,8 @@ import { RawEventStore } from "./db/store.js";
 import { TypedEventStore } from "./db/sqliteStore.js";
 import { Classifier } from "./domain/classifier.js";
 import { selectNewMatchEvents, type ClassifiedBlock } from "./domain/catchUp.js";
+import { loadEventHistorySource } from "./eventHistoryLoader.js";
+import type { EventHistorySource } from "./domain/eventHistory.js";
 import type { DomainEvent } from "./domain/types.js";
 
 export interface ProcessedBlock {
@@ -200,6 +202,31 @@ export class CapturePipeline extends EventEmitter {
     }
 
     return { newMatchIds, appendedEvents, kindCounts };
+  }
+
+  /**
+   * Milestone 25: a read-only snapshot of everything captured so far, for
+   * the event-closure check (domain/eventClosure.ts's findPendingClosures)
+   * and the Settings window's "Unfinished Events" section - see
+   * electron/main.ts. Same data eventHistoryLoader.ts's loadEventHistorySource
+   * always reads report.ts/the deck viewer from; this just wraps it so
+   * callers outside pipeline.ts never need direct store access.
+   */
+  loadHistorySource(): EventHistorySource {
+    return loadEventHistorySource(this.typedStore);
+  }
+
+  /**
+   * Milestone 25: records a user-entered final score for a run the
+   * automatic detection never saw finish (see types.ts's
+   * ManualCourseResult and domain/eventClosure.ts) - written directly,
+   * never classified from the log. Emits "domainEvent" like any other
+   * append, so a live listener (the overlay, if it cares) sees it too.
+   */
+  recordManualCourseResult(eventId: string, courseId: string | null, wins: number, losses: number): void {
+    const event: DomainEvent = { kind: "ManualCourseResult", eventId, courseId, wins, losses, ts: new Date().toISOString() };
+    this.typedStore.append(event);
+    this.emit("domainEvent", event);
   }
 
   /** Only meaningful once `located.found` is true. */

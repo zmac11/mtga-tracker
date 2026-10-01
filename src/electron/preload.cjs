@@ -49,4 +49,9 @@ contextBridge.exposeInMainWorld("settingsApi", {
   resetLogPath: () => ipcRenderer.invoke("reset-log-path"),
   chooseCardDbPath: () => ipcRenderer.invoke("choose-card-db-path"),
   resetCardDbPath: () => ipcRenderer.invoke("reset-card-db-path"),
+  // Milestone 25: the "Unfinished Events" section - runs the tracker's own
+  // detection never saw reach a final state, so the user can type in the
+  // correct score by hand.
+  getPendingEventClosures: () => ipcRenderer.invoke("get-pending-event-closures"),
+  submitManualEventResult: (eventId, courseId, wins, losses) => ipcRenderer.invoke("submit-manual-event-result", { eventId, courseId, wins, losses }),
 });

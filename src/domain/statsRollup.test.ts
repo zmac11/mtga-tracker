@@ -10,7 +10,7 @@ function emptySource(overrides: Partial<EventHistorySource>): EventHistorySource
   return {
     decks: [], completions: [], picks: [], packsSeen: [], matchFounds: [], matchCompletions: [],
     courseStandings: [], joins: [], rewards: [], cardPools: [], rewardGrants: [], handEvents: [],
-    playedEvents: [], gameStateSnapshots: [], myScreenName: "Me",
+    playedEvents: [], gameStateSnapshots: [], manualResults: [], myScreenName: "Me",
     ...overrides,
   };
 }

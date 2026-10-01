@@ -34,6 +34,7 @@ import { buildOpponentMatchRows } from "../domain/opponentStats.js";
 import { generateOpponentHtml } from "../opponentHtml.js";
 import { buildEventRewardRows, summarizeOverallRewards } from "../domain/rewardHistory.js";
 import { generateRewardHtml } from "../rewardHtml.js";
+import { findPendingClosures } from "../domain/eventClosure.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -1079,6 +1080,27 @@ app.whenReady().then(() => {
     };
   });
 
+  // Milestone 25: the Settings window's "Unfinished Events" section - see
+  // domain/eventClosure.ts for what counts as pending and why. Recomputed
+  // fresh on every call (cheap - the same read loadEventHistorySource
+  // already does for every report page) rather than cached, so a run that
+  // gets superseded or resolved while Settings happens to be open shows up
+  // correctly without needing to reopen the window.
+  ipcMain.handle("get-pending-event-closures", () => {
+    return findPendingClosures(pipeline.loadHistorySource());
+  });
+
+  ipcMain.handle("submit-manual-event-result", (_event, payload: unknown) => {
+    if (typeof payload !== "object" || payload === null) return { ok: false, reason: "Invalid request." };
+    const { eventId, courseId, wins, losses } = payload as Record<string, unknown>;
+    if (typeof eventId !== "string" || eventId.length === 0) return { ok: false, reason: "Invalid event." };
+    if (typeof wins !== "number" || typeof losses !== "number" || !Number.isFinite(wins) || !Number.isFinite(losses) || wins < 0 || losses < 0) {
+      return { ok: false, reason: "Enter a valid win/loss count." };
+    }
+    pipeline.recordManualCourseResult(eventId, typeof courseId === "string" ? courseId : null, Math.round(wins), Math.round(losses));
+    return { ok: true };
+  });
+
   // Milestone 18: the capture pipeline only resolves Player.log's path once,
   // at startup (see CapturePipeline's constructor) - there's no live
   // "re-point the tailer" support, and adding one would mean touching the
@@ -1820,6 +1842,33 @@ app.whenReady().then(() => {
     mainWindow?.webContents.send("settings", { fontSizePx: BASE_FONT_PX * preset.scale, opacity: overlaySettings.opacity });
   });
 
+  // Milestone 25: "when I start a new one, close out the previous one and
+  // let me type in the correct score" - see domain/eventClosure.ts for
+  // what counts as pending. notifiedPendingKeys is only this process's own
+  // memory (a relaunch re-notifies for anything still unresolved, same as
+  // the "couldn't find Player.log" notification elsewhere in this file) -
+  // its only job is not re-notifying twice for the same still-pending run
+  // within one session if more than one DraftJoined comes in.
+  const notifiedPendingKeys = new Set<string>();
+  function checkPendingClosures(): void {
+    try {
+      const pending = findPendingClosures(pipeline.loadHistorySource());
+      const fresh = pending.filter((p) => !notifiedPendingKeys.has(`${p.eventId}|${p.courseId ?? ""}`));
+      for (const p of pending) notifiedPendingKeys.add(`${p.eventId}|${p.courseId ?? ""}`);
+      if (fresh.length > 0 && Notification.isSupported()) {
+        const body =
+          fresh.length === 1
+            ? `Your ${fresh[0].identity.definitionLabel} run never showed a final result. Open Overlay Settings to enter the correct score.`
+            : `${fresh.length} past runs never showed a final result. Open Overlay Settings to enter their correct scores.`;
+        new Notification({ title: "MTGA Tracker", body }).show();
+      }
+    } catch (err) {
+      // Best-effort - never let this block the rest of startup/capture.
+      console.error("Pending-closure check failed:", err);
+    }
+  }
+  checkPendingClosures();
+
   if (pipeline.located.found) {
     watchingStatus = `Watching: ${pipeline.located.path}`;
     pipeline.on("domainEvent", (event) => {
@@ -1838,6 +1887,11 @@ app.whenReady().then(() => {
       // immediately if nothing's actually changing) so this is safe to call
       // on every event, not just the three draft-relevant kinds above.
       setOverlayDraftExpanded(snap.currentDraft !== null);
+      // Milestone 25: a new event being joined is exactly the moment an
+      // earlier same-format run (if any) becomes "superseded" - see
+      // domain/eventClosure.ts. Cheap enough to run on every join (joins
+      // are rare - once per event entered, nothing like per-match volume).
+      if (event.kind === "DraftJoined") checkPendingClosures();
       sendSnapshot(snap);
     });
     pipeline.on("error", (err) => console.error("Tailer error:", err));

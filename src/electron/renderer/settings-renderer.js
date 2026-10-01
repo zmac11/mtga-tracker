@@ -23,6 +23,9 @@ const resetLogPathBtn = document.getElementById("reset-log-path-btn");
 const cardDbPathStatusEl = document.getElementById("card-db-path-status");
 const chooseCardDbPathBtn = document.getElementById("choose-card-db-path-btn");
 const resetCardDbPathBtn = document.getElementById("reset-card-db-path-btn");
+// Milestone 25: the "Unfinished Events" section.
+const pendingClosuresSectionEl = document.getElementById("pending-closures-section");
+const pendingClosuresEl = document.getElementById("pending-closures");
 
 function showStatus(text) {
   statusEl.textContent = text;
@@ -210,6 +213,81 @@ resetCardDbPathBtn.addEventListener("click", async () => {
   }
 });
 
+// Milestone 25: one row per run domain/eventClosure.ts flagged as
+// superseded-but-never-finished - its own small Save flow, independent of
+// showStatus() above (several rows can be mid-save at once).
+function renderPendingClosures(list) {
+  pendingClosuresEl.innerHTML = "";
+  pendingClosuresSectionEl.style.display = list.length > 0 ? "" : "none";
+
+  for (const closure of list) {
+    const row = document.createElement("div");
+    row.className = "pending-closure-row";
+
+    const label = document.createElement("div");
+    label.className = "pending-closure-label";
+    label.textContent = closure.identity.definitionLabel;
+    row.appendChild(label);
+
+    const startedDate = new Date(closure.startedAt);
+    const sublabel = document.createElement("div");
+    sublabel.className = "pending-closure-sublabel";
+    sublabel.textContent = Number.isNaN(startedDate.getTime()) ? "Started at an unknown time" : `Started ${startedDate.toLocaleDateString()}`;
+    row.appendChild(sublabel);
+
+    const inputsRow = document.createElement("div");
+    inputsRow.className = "pending-closure-inputs";
+
+    const winsLabel = document.createElement("label");
+    const winsInput = document.createElement("input");
+    winsInput.type = "number";
+    winsInput.min = "0";
+    winsInput.value = String(closure.lastKnownWins);
+    winsLabel.appendChild(winsInput);
+    winsLabel.appendChild(document.createTextNode("wins"));
+
+    const lossesLabel = document.createElement("label");
+    const lossesInput = document.createElement("input");
+    lossesInput.type = "number";
+    lossesInput.min = "0";
+    lossesInput.value = String(closure.lastKnownLosses);
+    lossesLabel.appendChild(lossesInput);
+    lossesLabel.appendChild(document.createTextNode("losses"));
+
+    const saveBtn = document.createElement("button");
+    saveBtn.type = "button";
+    saveBtn.textContent = "Save";
+
+    const statusEl = document.createElement("span");
+    statusEl.className = "pending-closure-status";
+
+    saveBtn.addEventListener("click", async () => {
+      saveBtn.disabled = true;
+      statusEl.textContent = "";
+      try {
+        const result = await window.settingsApi.submitManualEventResult(closure.eventId, closure.courseId, Number(winsInput.value), Number(lossesInput.value));
+        if (result && result.ok) {
+          row.remove();
+          if (pendingClosuresEl.children.length === 0) pendingClosuresSectionEl.style.display = "none";
+        } else {
+          statusEl.textContent = (result && result.reason) || "Could not save that score.";
+          saveBtn.disabled = false;
+        }
+      } catch {
+        statusEl.textContent = "Could not save that score.";
+        saveBtn.disabled = false;
+      }
+    });
+
+    inputsRow.appendChild(winsLabel);
+    inputsRow.appendChild(lossesLabel);
+    inputsRow.appendChild(saveBtn);
+    row.appendChild(inputsRow);
+    row.appendChild(statusEl);
+    pendingClosuresEl.appendChild(row);
+  }
+}
+
 async function init() {
   const settings = await window.settingsApi.getSettings();
   renderSizeOptions(settings.presets, settings.sizePreset);
@@ -222,6 +300,7 @@ async function init() {
   // up), which was silently hiding the version again after any check.
   appVersionLineEl.textContent = settings.appVersion ? `MTGA Tracker v${settings.appVersion}` : "";
   renderLocations(settings);
+  renderPendingClosures(await window.settingsApi.getPendingEventClosures());
 }
 
 init();

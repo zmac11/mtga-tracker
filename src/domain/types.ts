@@ -401,6 +401,31 @@ export interface RewardGrant {
   ts: string;
 }
 
+/**
+ * Milestone 25: "the tracker missed an event's end - when I start a new
+ * one, close out the previous one and let me type in the correct score."
+ * Never classified from the log at all (unlike every other DomainEvent
+ * here) - written directly by the Settings window's "Unfinished Events"
+ * section (see electron/main.ts's "submit-manual-event-result" IPC
+ * handler and CapturePipeline.recordManualCourseResult) once the user
+ * confirms a final score for a run domain/eventClosure.ts flagged as
+ * superseded-but-never-finished. Scoped to (eventId, courseId) exactly
+ * like every other per-run lookup in this project (see courseRuns.ts) -
+ * courseId is null for the ordinary case of an eventId with nothing to
+ * disambiguate. Once one of these exists for a run, eventHistory.ts's
+ * standing reconciliation treats it as that run's authoritative final
+ * record (see buildEventRunHistory), same as a real "Complete"
+ * CourseStanding would have been.
+ */
+export interface ManualCourseResult {
+  kind: "ManualCourseResult";
+  eventId: string;
+  courseId: string | null;
+  wins: number;
+  losses: number;
+  ts: string;
+}
+
 export type DomainEvent =
   | DraftJoined
   | DraftPackSeen
@@ -416,4 +441,5 @@ export type DomainEvent =
   | EventCardPool
   | RewardGrant
   | GameHandResolved
-  | CardPlayedInGame;
+  | CardPlayedInGame
+  | ManualCourseResult;
