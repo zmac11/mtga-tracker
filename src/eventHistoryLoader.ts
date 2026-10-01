@@ -1,6 +1,6 @@
 import type { TypedEventStore } from "./db/sqliteStore.js";
 import type { EventHistorySource } from "./domain/eventHistory.js";
-import type { DraftPickMade } from "./domain/types.js";
+import type { CardPlayedInGame, DraftPickMade, GameHandResolved } from "./domain/types.js";
 
 /**
  * Thin loader between tracker.db and the pure domain/eventHistory.ts
@@ -62,6 +62,13 @@ export function loadEventHistorySource(store: TypedEventStore): EventHistorySour
   // eventId played more than once in a day produces multiple real,
   // distinct grants sharing one sourceId; only ts tells them apart.
   const rewardGrants = dedupeBy(store.all("RewardGrant"), (g) => `${g.source}|${g.sourceId}|${g.ts}`);
+  // Milestone 23 (features e/f): hand/played-card sources - same
+  // replayed-log dedup concern as everything else above. ts alone isn't a
+  // safe natural key here (two different cards leaving hand in the same
+  // game can share a ts if captured in the same diff), so the full tuple
+  // identifying WHAT happened is the key instead.
+  const handEvents: GameHandResolved[] = dedupeBy(store.all("GameHandResolved"), (h) => `${h.matchId}|${h.gameNumber}|${h.seat}|${h.ts}`);
+  const playedEvents: CardPlayedInGame[] = dedupeBy(store.all("CardPlayedInGame"), (p) => `${p.matchId}|${p.gameNumber}|${p.seat}|${p.grpId}|${p.ts}`);
 
-  return { decks, completions, picks, packsSeen, matchFounds, matchCompletions, courseStandings, joins, rewards, cardPools, rewardGrants, myScreenName };
+  return { decks, completions, picks, packsSeen, matchFounds, matchCompletions, courseStandings, joins, rewards, cardPools, rewardGrants, handEvents, playedEvents, myScreenName };
 }

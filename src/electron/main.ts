@@ -25,6 +25,11 @@ import { buildLimitedStatsRows, buildStatsCardCatalog, winRateOf } from "../doma
 import { generateStatsHtml } from "../statsHtml.js";
 import { buildPickPriorityRows } from "../domain/draftPickPriority.js";
 import { generateDraftPickStatsHtml, type DraftPickStatsRow } from "../draftPickStatsHtml.js";
+import { computeMatchOutcomes, buildGameOutcomeIndex } from "../domain/rollups.js";
+import { parseEventIdentity, resolveEventFormat } from "../domain/eventIdentity.js";
+import { buildCardSituationalWinRateRows, type GameResultContext } from "../domain/cardSituationalWinRate.js";
+import { generateCardSituationalWinRateHtml, type CardSituationalWinRateHtmlRow } from "../cardSituationalWinRateHtml.js";
+import { compareTs } from "../domain/courseRuns.js";
 import { buildOpponentMatchRows } from "../domain/opponentStats.js";
 import { generateOpponentHtml } from "../opponentHtml.js";
 import { buildEventRewardRows, summarizeOverallRewards } from "../domain/rewardHistory.js";
@@ -366,6 +371,8 @@ let openOpponentHistoryPage: (() => void) | null = null;
 let openRewardHistoryPage: (() => void) | null = null;
 // Milestone 23 (feature d): same module-level slot pattern as the tray items above.
 let openDraftPickStatsPage: (() => void) | null = null;
+// Milestone 23 (features e/f): same module-level slot pattern as the tray items above.
+let openCardSituationalWinRatePage: (() => void) | null = null;
 
 /**
  * Milestone 15: remembers the outcome of the last version check across
@@ -785,6 +792,7 @@ function rebuildTrayMenu(): void {
     { label: "Opponent History...", click: () => openOpponentHistoryPage?.() },
     { label: "Reward History...", click: () => openRewardHistoryPage?.() },
     { label: "Draft Pick Stats...", click: () => openDraftPickStatsPage?.() },
+    { label: "Card Situational Win Rate...", click: () => openCardSituationalWinRatePage?.() },
     { type: "separator" },
     { label: formatLastCardRefreshLabel(cardRefreshStatus), enabled: false },
     {
@@ -1526,6 +1534,129 @@ app.whenReady().then(() => {
       try {
         if (Notification.isSupported()) {
           new Notification({ title: "MTGA Tracker", body: "Couldn't open Draft Pick Stats - check the logs." }).show();
+        }
+      } catch {
+        // Notifications are a nice-to-have.
+      }
+    } finally {
+      store?.close();
+      cardStore?.close();
+    }
+  };
+
+  /**
+   * Milestone 23 (features e/f, 2026-09-30 request): "win rate on cards
+   * based on whether they were in the opening hand" / "...played during
+   * the match", per format - the tray's "Card Situational Win Rate..."
+   * item. Dataset-wide, same convention as Draft Pick Stats above.
+   *
+   * This is the "Electron layer joins" half of
+   * domain/cardSituationalWinRate.ts's deliberately pure
+   * buildCardSituationalWinRateRows (see that module's own header comment
+   * for why the split exists) - for every game of every match with a
+   * captured outcome, it resolves:
+   *  - this match's own seat (MatchFound.players[].systemSeatId, matched
+   *    to myScreenName - same join every other per-seat lookup in this
+   *    project uses, e.g. matchDetails.ts),
+   *  - the deck that was actually live for this match (the latest
+   *    DeckSubmitted for the same eventName with submittedAt <= the
+   *    match's own ts, falling back to the EARLIEST submission overall if
+   *    none precedes it - same "never silently drop a match" fallback
+   *    deckVersions.ts's deriveDeckVersions already uses for exactly this
+   *    situation),
+   *  - that run's resolved format (eventIdentity.ts's resolveEventFormat,
+   *    preferring the deck's own real Format attribute over the
+   *    name-based guess),
+   *  - and this specific game's own outcome (rollups.ts's
+   *    buildGameOutcomeIndex, not just the match's final result - the
+   *    whole point of milestone 23's Bo3 work, so a Bo3 game 1 loss
+   *    doesn't get blamed on cards that only showed up in game 2's win).
+   *
+   * A match with no resolvable deck at all (no DeckSubmitted ever
+   * captured for its eventName) is skipped entirely - there's no card
+   * universe to attribute its games to.
+   */
+  openCardSituationalWinRatePage = (): void => {
+    const dbPath = join(pipeline.dataDir, "tracker.db");
+    let store: TypedEventStore | null = null;
+    let cardStore: CardStore | null = null;
+    try {
+      store = new TypedEventStore(dbPath);
+      cardStore = new CardStore(dbPath);
+      const source = loadEventHistorySource(store);
+
+      const outcomes = computeMatchOutcomes(source.matchFounds, source.matchCompletions, source.myScreenName);
+      const gameOutcomeIndex = buildGameOutcomeIndex(outcomes);
+
+      // Latest-submission-at-or-before-ts, falling back to the earliest
+      // overall - same resolution deriveDeckVersions.ts's own match
+      // attribution uses, just inlined here since this needs the deck
+      // ITSELF (for its card ids/format), not a version's attributed
+      // match list.
+      const decksByEvent = new Map<string, (typeof source.decks)>();
+      for (const d of source.decks) {
+        const list = decksByEvent.get(d.eventName) ?? [];
+        list.push(d);
+        decksByEvent.set(d.eventName, list);
+      }
+      for (const list of decksByEvent.values()) list.sort((a, b) => compareTs(a.ts, b.ts));
+
+      const games: GameResultContext[] = [];
+      for (const found of source.matchFounds) {
+        const me = found.players.find((p) => p.playerName === source.myScreenName);
+        if (!me || !found.eventId) continue;
+
+        const deckList = decksByEvent.get(found.eventId);
+        if (!deckList || deckList.length === 0) continue; // no deck ever captured for this run - nothing to attribute these games to
+        let deck = deckList[0];
+        for (const d of deckList) {
+          if (d.ts <= found.ts) deck = d;
+          else break;
+        }
+
+        const identity = parseEventIdentity(found.eventId);
+        const format = resolveEventFormat(identity, deck.format);
+        const deckCardIds = [...deck.mainDeck, ...deck.sideboard].map((e) => e.cardId);
+        if (deckCardIds.length === 0) continue;
+
+        const outcome = outcomes.find((o) => o.matchId === found.matchId);
+        const gameCount = outcome?.games?.sequence.length ?? 0;
+        for (let gameNumber = 1; gameNumber <= gameCount; gameNumber++) {
+          const gameOutcome = gameOutcomeIndex.get(`${found.matchId}|${gameNumber}`);
+          if (!gameOutcome) continue;
+          games.push({ matchId: found.matchId, gameNumber, mySeat: me.systemSeatId, format, deckCardIds, outcome: gameOutcome });
+        }
+      }
+
+      const situationalRows = buildCardSituationalWinRateRows(games, source.handEvents, source.playedEvents);
+
+      const cardsById = new Map<number, { name: string; colors: string[] }>();
+      for (const c of cardStore.all()) cardsById.set(c.grpId, { name: c.name, colors: c.colors });
+      const rows: CardSituationalWinRateHtmlRow[] = situationalRows.map((r) => {
+        const info = cardsById.get(r.cardId);
+        return {
+          cardId: r.cardId,
+          name: info?.name ?? `Unknown card #${r.cardId} (run npm run refresh-cards)`,
+          colors: info?.colors ?? [],
+          format: r.format,
+          inHand: r.inHand,
+          notInHand: r.notInHand,
+          played: r.played,
+          notPlayed: r.notPlayed,
+        };
+      });
+
+      const html = generateCardSituationalWinRateHtml(rows);
+      const outDir = join(pipeline.dataDir, "stats");
+      mkdirSync(outDir, { recursive: true });
+      const outPath = join(outDir, "card-situational-winrate.html");
+      writeFileSync(outPath, html, "utf8");
+      shell.openPath(outPath);
+    } catch (err) {
+      console.error("Failed to generate/open card situational win rate page:", err);
+      try {
+        if (Notification.isSupported()) {
+          new Notification({ title: "MTGA Tracker", body: "Couldn't open Card Situational Win Rate - check the logs." }).show();
         }
       } catch {
         // Notifications are a nice-to-have.

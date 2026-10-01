@@ -1,4 +1,4 @@
-import type { DraftPackSeen, DraftPickMade, DeckSubmitted, DraftCompleted, MatchFound, MatchCompleted, CourseStanding, DraftJoined, EventReward, EventCardPool, RewardGrant } from "./types.js";
+import type { DraftPackSeen, DraftPickMade, DeckSubmitted, DraftCompleted, MatchFound, MatchCompleted, CourseStanding, DraftJoined, EventReward, EventCardPool, RewardGrant, GameHandResolved, CardPlayedInGame } from "./types.js";
 import { computeMatchOutcomes, latestStandingByEvent, reconcileWinRate, winRate, type MatchOutcome, type WinRate } from "./rollups.js";
 import { parseEventIdentity, resolveEventFormat, type EventIdentity, type EventFormat } from "./eventIdentity.js";
 import { deriveDeckVersions, type DeckVersion } from "./deckVersions.js";
@@ -133,6 +133,16 @@ export interface EventHistorySource {
    * the earned-vs-not categorization - this field is deliberately raw.
    */
   rewardGrants: RewardGrant[];
+  /**
+   * Milestone 23 (features e/f): "was this card in my opening hand" / "...
+   * played during the match" sources - see classifier.ts's
+   * classifyHandAndPlayedCards. Dataset-wide and NOT pre-filtered by
+   * match/event, same convention as picks/packsSeen above; consumers
+   * (cardSituationalWinRate.ts's buildCardSituationalWinRateRows, via its
+   * own matchId|gameNumber|seat keying) do their own joining.
+   */
+  handEvents: GameHandResolved[];
+  playedEvents: CardPlayedInGame[];
   myScreenName: string | null;
 }
 

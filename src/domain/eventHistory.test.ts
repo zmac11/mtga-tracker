@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { buildEventRunHistory, listEventRuns, type EventHistorySource } from "./eventHistory.js";
 
 function baseSource(): EventHistorySource {
-  return { decks: [], completions: [], picks: [], packsSeen: [], matchFounds: [], matchCompletions: [], courseStandings: [], joins: [], rewards: [], cardPools: [], rewardGrants: [], myScreenName: "Me" };
+  return { decks: [], completions: [], picks: [], packsSeen: [], matchFounds: [], matchCompletions: [], courseStandings: [], joins: [], rewards: [], cardPools: [], rewardGrants: [], handEvents: [], playedEvents: [], myScreenName: "Me" };
 }
 
 function run() {
