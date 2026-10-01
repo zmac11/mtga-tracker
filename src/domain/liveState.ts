@@ -9,7 +9,7 @@ import type {
   MatchCompleted,
   MatchFound,
 } from "./types.js";
-import { computeMatchOutcomes, reconcileWinRate, rollupByEvent, winRate, type WinRate } from "./rollups.js";
+import { computeMatchOutcomes, reconcileWinRate, rollupByEvent, winRate, type GameOutcome, type WinRate } from "./rollups.js";
 import { buildCourseWindows, assignCourseId, compareTs, type CourseWindow } from "./courseRuns.js";
 
 function dedupeLatestByKey<T>(items: T[], keyFn: (item: T) => string): T[] {
@@ -44,8 +44,8 @@ export interface OverlayMatch {
    * expected to go 1 -> 2 -> (3) for a real Bo3, not yet observed live.
    */
   currentGameNumber: number | null;
-  /** Milestone 18: the completed match's own per-game score - see MatchOutcome.games in rollups.ts. Null until the match (and its MatchCompleted) is captured. */
-  games: { wins: number; losses: number } | null;
+  /** Milestone 18 (widened milestone 23 for Bo3's own per-game sequence): the completed match's own per-game score - see MatchOutcome.games in rollups.ts. Null until the match (and its MatchCompleted) is captured. */
+  games: { wins: number; losses: number; sequence: GameOutcome[] } | null;
 }
 
 /**

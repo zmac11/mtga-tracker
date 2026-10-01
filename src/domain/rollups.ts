@@ -41,7 +41,23 @@ export interface MatchOutcome {
    * MatchScope_Game entries exist), so it should generalize correctly to a
    * real 2-1/2-0 Bo3 result once one is captured.
    */
-  games: { wins: number; losses: number } | null;
+  games: { wins: number; losses: number; sequence: GameOutcome[] } | null;
+}
+
+/**
+ * Milestone 23 (Bo3 data): one entry per MatchScope_Game result within a
+ * match, in play order. `gameNumber` is NECESSARILY INFERRED, not read
+ * from any field Arena sends - finalMatchResult.resultList's
+ * MatchScope_Game entries carry no gameNumber of their own (confirmed by
+ * scanning every real captured match to date, all Bo1), so this assumes
+ * the array's own order IS play order and numbers from there, 1-indexed.
+ * Every real match captured so far is Bo1 (exactly one MatchScope_Game
+ * entry), so this assumption is UNVALIDATED against a real Bo3 - it will
+ * need re-checking the first time one is actually captured.
+ */
+export interface GameOutcome {
+  gameNumber: number;
+  outcome: "WIN" | "LOSS";
 }
 
 export function computeMatchOutcomes(
@@ -62,17 +78,40 @@ export function computeMatchOutcomes(
       reason = matchResult.reason.replace("ResultReason_", "");
     }
 
-    let games: { wins: number; losses: number } | null = null;
+    let games: { wins: number; losses: number; sequence: GameOutcome[] } | null = null;
     if (me && completion) {
       const gameResults = completion.results.filter((r) => r.scope === "MatchScope_Game");
       if (gameResults.length > 0) {
-        const wins = gameResults.filter((r) => r.winningTeamId === me.teamId).length;
-        games = { wins, losses: gameResults.length - wins };
+        const sequence: GameOutcome[] = gameResults.map((r, i) => ({
+          gameNumber: i + 1,
+          outcome: r.winningTeamId === me.teamId ? "WIN" : "LOSS",
+        }));
+        const wins = sequence.filter((g) => g.outcome === "WIN").length;
+        games = { wins, losses: sequence.length - wins, sequence };
       }
     }
 
     return { matchId: found.matchId, eventId: found.eventId, opponent: opponent?.playerName ?? "?", outcome, reason, ts: found.ts, games };
   });
+}
+
+/**
+ * Milestone 23 (Bo3 data): "did I win game 2 of this match" style lookups,
+ * for callers (e.g. the card-situational-win-rate aggregation) that need a
+ * specific game's own outcome rather than the whole match's. Keyed by
+ * `${matchId}|${gameNumber}` - a plain composite string key rather than a
+ * nested Map, since every caller looks up one exact (matchId, gameNumber)
+ * pair and never needs "all games for this match" as its own operation.
+ */
+export function buildGameOutcomeIndex(outcomes: MatchOutcome[]): Map<string, "WIN" | "LOSS"> {
+  const index = new Map<string, "WIN" | "LOSS">();
+  for (const o of outcomes) {
+    if (!o.games) continue;
+    for (const g of o.games.sequence) {
+      index.set(`${o.matchId}|${g.gameNumber}`, g.outcome);
+    }
+  }
+  return index;
 }
 
 export interface WinRate {

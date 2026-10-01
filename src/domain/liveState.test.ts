@@ -382,7 +382,15 @@ function run() {
   });
   const bo3Snap = bo3.snapshot();
   assert.equal(bo3Snap.match?.outcome, "WIN");
-  assert.deepEqual(bo3Snap.match?.games, { wins: 2, losses: 1 });
+  assert.deepEqual(bo3Snap.match?.games, {
+    wins: 2,
+    losses: 1,
+    sequence: [
+      { gameNumber: 1, outcome: "LOSS" },
+      { gameNumber: 2, outcome: "WIN" },
+      { gameNumber: 3, outcome: "WIN" },
+    ],
+  });
 
   console.log(
     "OK: LiveStateTracker handled match found/game-state/completed, accumulating win rate per event without cross-contamination, reconciled with Arena's own CourseStanding in both directions, seeded correct history at startup without faking a live match, tracked/resumed live draft progress correctly, carries every card from a multi-card 'Pick Two' pick, and (milestone 18) surfaces the live game number and a completed match's own per-game Bo3 score.",

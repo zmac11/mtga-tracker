@@ -11,7 +11,7 @@
 // already had via liveState.test.ts/eventHistory.test.ts.
 
 import assert from "node:assert/strict";
-import { rollupByEventDefinition, rollupBySubtype, rollupByFormat, computeMatchOutcomes, type MatchOutcome } from "./rollups.js";
+import { rollupByEventDefinition, rollupBySubtype, rollupByFormat, computeMatchOutcomes, buildGameOutcomeIndex, type MatchOutcome } from "./rollups.js";
 import type { CourseStanding, MatchFound, MatchCompleted } from "./types.js";
 
 function outcome(eventId: string | null, outcome: "WIN" | "LOSS" | null): MatchOutcome {
@@ -176,7 +176,7 @@ function runGamesCoverage() {
   };
   const bo1 = computeMatchOutcomes([found], [bo1Completion], "Me");
   assert.equal(bo1[0].outcome, "WIN");
-  assert.deepEqual(bo1[0].games, { wins: 1, losses: 0 });
+  assert.deepEqual(bo1[0].games, { wins: 1, losses: 0, sequence: [{ gameNumber: 1, outcome: "WIN" }] });
 
   // Synthetic Bo3 shape: I lose game 1, win games 2 and 3, win the match -
   // three MatchScope_Game entries plus one MatchScope_Match entry, same
@@ -194,13 +194,42 @@ function runGamesCoverage() {
   };
   const bo3 = computeMatchOutcomes([found], [bo3Completion], "Me");
   assert.equal(bo3[0].outcome, "WIN", "overall match outcome is still decided by MatchScope_Match alone, unaffected by this field existing");
-  assert.deepEqual(bo3[0].games, { wins: 2, losses: 1 });
+  assert.deepEqual(bo3[0].games, {
+    wins: 2,
+    losses: 1,
+    // gameNumber is INFERRED (1-indexed array position) - Arena's own
+    // resultList carries no gameNumber of its own on these entries. Lost
+    // game 1 (I'm teamId 1, winningTeamId 2), won games 2 and 3.
+    sequence: [
+      { gameNumber: 1, outcome: "LOSS" },
+      { gameNumber: 2, outcome: "WIN" },
+      { gameNumber: 3, outcome: "WIN" },
+    ],
+  });
 
   // No MatchCompleted at all yet (match still in progress) -> games is null, not a wrong count.
   const inProgress = computeMatchOutcomes([found], [], "Me");
   assert.equal(inProgress[0].games, null);
 
-  console.log("OK: computeMatchOutcomes' games field correctly tallies per-game results for both the always-seen Bo1 shape (1-0/0-1) and a synthetic Bo3 shape (2-1), leaving the match's own WIN/LOSS outcome (decided by MatchScope_Match alone) unaffected either way, and stays null while the match is still in progress.");
+  console.log("OK: computeMatchOutcomes' games field correctly tallies per-game results for both the always-seen Bo1 shape (1-0/0-1) and a synthetic Bo3 shape (2-1), with each game's own inferred gameNumber/outcome in sequence order, leaving the match's own WIN/LOSS outcome (decided by MatchScope_Match alone) unaffected either way, and stays null while the match is still in progress.");
+
+  // buildGameOutcomeIndex: a lookup for "what happened in game N of match
+  // M" specifically, built from the same bo3 outcomes above - including
+  // confirming it skips matches with games: null (the in-progress one)
+  // rather than crashing or inserting a bogus entry for it.
+  // bo1 and bo3 fixtures reuse the same matchId ("bo3-m1"), so processing
+  // bo1 first then bo3 means bo3's own game-1 entry (LOSS) overwrites
+  // bo1's game-1 entry (WIN) - last-write-wins, same convention as
+  // latestStandingByEvent. Using a distinct matchId per fixture would
+  // avoid relying on this, but exercising the overwrite deliberately here
+  // confirms the index doesn't silently keep a stale first-seen entry.
+  const index = buildGameOutcomeIndex([...bo1, ...bo3, ...inProgress]);
+  assert.equal(index.get("bo3-m1|1"), "LOSS");
+  assert.equal(index.get("bo3-m1|2"), "WIN");
+  assert.equal(index.get("bo3-m1|3"), "WIN");
+  assert.equal(index.size, 3);
+
+  console.log("OK: buildGameOutcomeIndex looks up a specific game's own outcome by matchId+gameNumber, skipping matches with no captured games.");
 }
 
 runGamesCoverage();
