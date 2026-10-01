@@ -1,4 +1,5 @@
 import { CARD_PREVIEW_CSS, CARD_PREVIEW_JS, cardPreviewInnerHtml, colorDotsHtml, escapeHtml } from "./htmlCardHelpers.js";
+import { FAVICON_LINK_TAG } from "./faviconHtml.js";
 
 /**
  * Milestone 7 phase 5: generates the live draft-progress browser page - the
@@ -93,6 +94,7 @@ export function generateNoDraftInProgressHtml(): string {
 <meta charset="utf-8">
 <meta http-equiv="refresh" content="${REFRESH_INTERVAL_SECONDS}">
 <title>No draft in progress - MTGA Tracker</title>
+${FAVICON_LINK_TAG}
 <style>
   :root { color-scheme: dark; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #14151a; color: #e8e8ec; margin: 0; padding: 24px; }
@@ -122,6 +124,7 @@ export function generateDraftProgressHtml(data: DraftProgressData): string {
 <meta charset="utf-8">
 <meta http-equiv="refresh" content="${REFRESH_INTERVAL_SECONDS}">
 <title>Draft in progress - MTGA Tracker</title>
+${FAVICON_LINK_TAG}
 <style>
   :root { color-scheme: dark; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #14151a; color: #e8e8ec; margin: 0; padding: 24px; }

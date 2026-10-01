@@ -1,4 +1,5 @@
 import type { EventRewardRow, OverallRewardSummary } from "./domain/rewardHistory.js";
+import { FAVICON_LINK_TAG } from "./faviconHtml.js";
 
 /**
  * Milestone 21 (2026-10-01): "layout of event rewards - button in
@@ -38,6 +39,7 @@ export function generateRewardHtml(rows: EventRewardRow[], overall: OverallRewar
 <head>
 <meta charset="utf-8">
 <title>Reward History - MTGA Tracker</title>
+${FAVICON_LINK_TAG}
 <style>
   :root { color-scheme: dark; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #14151a; color: #e8e8ec; margin: 0; padding: 24px; }

@@ -1,4 +1,5 @@
 import type { OpponentMatchRow } from "./domain/opponentStats.js";
+import { FAVICON_LINK_TAG } from "./faviconHtml.js";
 
 /**
  * Milestone 20 (2026-09-30): "I want to search which opponents I have
@@ -22,6 +23,7 @@ export function generateOpponentHtml(rows: OpponentMatchRow[]): string {
 <head>
 <meta charset="utf-8">
 <title>Opponent History - MTGA Tracker</title>
+${FAVICON_LINK_TAG}
 <style>
   :root { color-scheme: dark; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #14151a; color: #e8e8ec; margin: 0; padding: 24px; }

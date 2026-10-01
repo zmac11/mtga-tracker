@@ -1,4 +1,5 @@
 import { escapeHtml } from "./htmlCardHelpers.js";
+import { FAVICON_LINK_TAG } from "./faviconHtml.js";
 import type { EventIdentity } from "./domain/eventIdentity.js";
 import type { WinRate } from "./domain/rollups.js";
 
@@ -82,6 +83,7 @@ export function generatePastEventsHtml(rows: PastEventRow[]): string {
 <head>
 <meta charset="utf-8">
 <title>Past Events - MTGA Tracker</title>
+${FAVICON_LINK_TAG}
 <style>
   :root { color-scheme: dark; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #14151a; color: #e8e8ec; margin: 0; padding: 24px; }

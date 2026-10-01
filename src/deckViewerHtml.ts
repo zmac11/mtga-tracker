@@ -1,5 +1,6 @@
 import { groupByManaCurve, type AverageManaValue, type CardCurveInfo, type CurveBucket } from "./domain/manaCurve.js";
 import { CARD_PREVIEW_CSS, CARD_PREVIEW_JS, cardPreviewInnerHtml, colorDotsHtml, escapeHtml } from "./htmlCardHelpers.js";
+import { FAVICON_LINK_TAG } from "./faviconHtml.js";
 
 /**
  * Milestone 7 phase 4: generates the deck-viewer browser page for one event
@@ -479,6 +480,7 @@ export function generateDeckViewerHtml(data: DeckViewerData): string {
 <head>
 <meta charset="utf-8">
 <title>${escapeHtml(data.deckName ?? data.definitionLabel)} - MTGA Tracker</title>
+${FAVICON_LINK_TAG}
 <style>
   :root { color-scheme: dark; --card-img-width: ${cardImageWidthPx}px; --card-overlap: calc(var(--card-img-width) * -1.05); }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #14151a; color: #e8e8ec; margin: 0; padding: 24px; }

@@ -1,4 +1,5 @@
 import type { LimitedStatsRow, StatsCardInfo } from "./domain/statsRollup.js";
+import { FAVICON_LINK_TAG } from "./faviconHtml.js";
 
 /**
  * Milestone 20 (2026-09-30): "Add some kind of filter for event types and
@@ -45,6 +46,7 @@ export function generateStatsHtml(rows: LimitedStatsRow[], cardCatalog: StatsCar
 <head>
 <meta charset="utf-8">
 <title>Limited Stats - MTGA Tracker</title>
+${FAVICON_LINK_TAG}
 <style>
   :root { color-scheme: dark; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #14151a; color: #e8e8ec; margin: 0; padding: 24px; }
