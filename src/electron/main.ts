@@ -4,7 +4,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { exec } from "node:child_process";
 import { CapturePipeline } from "../pipeline.js";
-import { LiveStateTracker } from "../domain/liveState.js";
+import { LiveStateTracker, type OverlaySnapshot } from "../domain/liveState.js";
 import { TypedEventStore } from "../db/sqliteStore.js";
 import { CardStore } from "../cards/cardStore.js";
 import { locateCardDatabase } from "../cards/cardDbLocator.js";
@@ -17,7 +17,7 @@ import { buildShareShellParts, generateDeckShareHtml, renderShareSectionHtml, ty
 import { buildArenaImportText, type ArenaExportCardInfo } from "../domain/arenaExport.js";
 import type { ViewerCard } from "../deckViewerHtml.js";
 import { buildDraftProgressData } from "../draftProgressLoader.js";
-import { generateDraftProgressHtml, generateNoDraftInProgressHtml } from "../draftProgressHtml.js";
+import { draftBoardFragmentHtml, generateDraftProgressHtml, generateNoDraftInProgressHtml } from "../draftProgressHtml.js";
 import { loadEventHistorySource } from "../eventHistoryLoader.js";
 import { listEventRuns, buildEventRunHistory } from "../domain/eventHistory.js";
 import { generatePastEventsHtml, type PastEventRow } from "../pastEventsHtml.js";
@@ -171,6 +171,23 @@ const SIZE_PRESETS: Record<string, { label: string; scale: number; width: number
   xlarge: { label: "Extra Large", scale: 1.5, width: Math.round(BASE_WIDTH * 1.5), height: Math.round(BASE_HEIGHT * 1.5) },
 };
 const DEFAULT_SIZE_PRESET = "medium";
+
+/**
+ * Milestone 23: how much bigger the overlay window gets while a draft is
+ * actively in progress, so the expanded draft-board panel (every pack seen
+ * so far, picks made, colors taken) has real room to show instead of being
+ * squeezed into the normal ~300x180 HUD - the user explicitly chose growing
+ * the overlay itself over a separate page for this (see the milestone 23
+ * design notes). Scaled by the user's chosen size preset the same way
+ * BASE_WIDTH/BASE_HEIGHT are, so "Large"/"Extra Large" users get a
+ * proportionally bigger draft board too, not a fixed add-on. Added on top
+ * of (not instead of) the normal preset dimensions - the match/event-record
+ * HUD content keeps its usual size and position, the draft board is extra
+ * room alongside it.
+ */
+const DRAFT_BOARD_EXTRA_WIDTH = 280;
+const DRAFT_BOARD_EXTRA_HEIGHT = 260;
+
 const DEFAULT_OPACITY = 0.72; // matches the panel's original hardcoded background alpha
 const MIN_OPACITY = 0.2;
 const MAX_OPACITY = 1;
@@ -596,25 +613,59 @@ function createWindow(settings: OverlaySettings): BrowserWindow {
 
 /**
  * Milestone 9+: applies a (possibly just-changed) size/opacity choice to the
- * already-running overlay - persists it, resizes the actual window to the
- * new preset's dimensions (keeping its current top-left corner fixed, so it
- * grows/shrinks in place rather than jumping to a different part of the
- * screen), and pushes the resulting font-size + opacity to the overlay's
- * renderer so it takes effect immediately with no reload/flicker. Also used
- * once at startup (from within the did-finish-load handler below) to push
- * the settings loaded from disk, since the window is already created at the
- * right *size* by createWindow() but the renderer still needs telling what
+ * already-running overlay - persists it and resizes the actual window (now
+ * via applyWindowBounds() below, which also accounts for whether the draft
+ * board is currently expanded - milestone 23). Also used once at startup
+ * (from within the did-finish-load handler below) to push the settings
+ * loaded from disk, since the window is already created at the right *size*
+ * by createWindow() but the renderer still needs telling what
  * font-size/opacity that corresponds to.
  */
+
+/**
+ * Milestone 23: true while the overlay window is currently grown to show
+ * the draft-board panel (see DRAFT_BOARD_EXTRA_WIDTH/HEIGHT above) - tracked
+ * separately from overlaySettings itself since it's derived from whether a
+ * draft is live right now, not a user preference that gets persisted.
+ */
+let overlayDraftExpanded = false;
+
+/**
+ * Milestone 23: applies the current overlaySettings (size preset) AND the
+ * current overlayDraftExpanded state to the already-running window in one
+ * place - pulled out of applyOverlaySettings below so setOverlayDraftExpanded
+ * can resize the window the same way a Settings-window size change does,
+ * without duplicating the setBounds/font-size-push logic. Keeps the window's
+ * current top-left corner fixed (same as the original behavior) so it
+ * grows/shrinks in place rather than jumping to a different part of the
+ * screen.
+ */
+function applyWindowBounds(): void {
+  const preset = SIZE_PRESETS[overlaySettings.sizePreset] ?? SIZE_PRESETS[DEFAULT_SIZE_PRESET];
+  const width = preset.width + (overlayDraftExpanded ? Math.round(DRAFT_BOARD_EXTRA_WIDTH * preset.scale) : 0);
+  const height = preset.height + (overlayDraftExpanded ? Math.round(DRAFT_BOARD_EXTRA_HEIGHT * preset.scale) : 0);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    const [x, y] = mainWindow.getPosition();
+    mainWindow.setBounds({ x, y, width, height });
+    mainWindow.webContents.send("settings", { fontSizePx: BASE_FONT_PX * preset.scale, opacity: overlaySettings.opacity });
+  }
+}
+
+/**
+ * Milestone 23: grows/shrinks the overlay window when a draft starts/ends -
+ * a no-op if the expanded state isn't actually changing (so this is safe to
+ * call on every snapshot without resizing on every single domain event).
+ */
+function setOverlayDraftExpanded(expanded: boolean): void {
+  if (expanded === overlayDraftExpanded) return;
+  overlayDraftExpanded = expanded;
+  applyWindowBounds();
+}
+
 function applyOverlaySettings(settings: OverlaySettings): void {
   overlaySettings = settings;
   saveOverlaySettings(settings);
-  const preset = SIZE_PRESETS[settings.sizePreset] ?? SIZE_PRESETS[DEFAULT_SIZE_PRESET];
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    const [x, y] = mainWindow.getPosition();
-    mainWindow.setBounds({ x, y, width: preset.width, height: preset.height });
-    mainWindow.webContents.send("settings", { fontSizePx: BASE_FONT_PX * preset.scale, opacity: settings.opacity });
-  }
+  applyWindowBounds();
 }
 
 function toggleInteractive(): void {
@@ -1433,10 +1484,10 @@ app.whenReady().then(() => {
   // progress" placeholder) so a tab left open never shows stale, already-
   // finished pack contents as if they were still current.
   const draftProgressPath = join(pipeline.dataDir, "draft-progress", "live.html");
-  const regenerateDraftProgressPage = () => {
+  const regenerateDraftProgressPage = (snap: OverlaySnapshot = liveState.snapshot()) => {
     try {
       mkdirSync(join(pipeline.dataDir, "draft-progress"), { recursive: true });
-      const currentDraft = liveState.snapshot().currentDraft;
+      const currentDraft = snap.currentDraft;
       if (!currentDraft) {
         writeFileSync(draftProgressPath, generateNoDraftInProgressHtml(), "utf8");
         return;
@@ -1459,22 +1510,64 @@ app.whenReady().then(() => {
     return { ok: true };
   });
 
-  const sendSnapshot = () => {
+  /**
+   * Milestone 23: the overlay's own draft-board panel content (every pack
+   * seen so far, picks made, colors taken), as a pre-rendered HTML fragment
+   * the overlay renderer drops straight into the DOM - same resolved data
+   * (buildDraftProgressData) and the same "only re-read the card catalog on
+   * a draft-relevant event" gating as regenerateDraftProgressPage above,
+   * just rendered as a compact fragment (draftBoardFragmentHtml) instead of
+   * a full page. Cached here rather than rebuilt on every sendSnapshot call
+   * (which fires on every domain event, including plain match/game-state
+   * ones that can't possibly change this) - null means "no draft board to
+   * show", which is also what clears the panel once a draft completes.
+   */
+  let draftBoardHtml: string | null = null;
+  const refreshDraftBoardHtml = (snap: OverlaySnapshot = liveState.snapshot()) => {
+    const currentDraft = snap.currentDraft;
+    if (!currentDraft) {
+      draftBoardHtml = null;
+      return;
+    }
+    const cardStore = new CardStore(join(pipeline.dataDir, "tracker.db"));
+    try {
+      draftBoardHtml = draftBoardFragmentHtml(buildDraftProgressData(currentDraft, cardStore));
+    } catch (err) {
+      console.error("Failed to refresh overlay draft board:", err);
+      draftBoardHtml = null;
+    } finally {
+      cardStore.close();
+    }
+  };
+
+  const sendSnapshot = (snap: OverlaySnapshot = liveState.snapshot()) => {
     if (!mainWindow || mainWindow.isDestroyed()) return;
     mainWindow.webContents.send("state", {
       foundLog: pipeline.located.found,
       watchingPath: pipeline.located.path,
-      snapshot: liveState.snapshot(),
+      snapshot: snap,
+      draftBoardHtml,
     });
   };
 
   mainWindow.webContents.once("did-finish-load", () => {
-    sendSnapshot();
+    // Milestone 23: if a draft was already in progress before this launch
+    // (seedHistory resumed it as "current" - see LiveStateTracker.seedHistory's
+    // comment), size the window and populate the draft board for it right
+    // away, rather than waiting for the next live pack/pick event to notice.
+    const initialSnap = liveState.snapshot();
+    refreshDraftBoardHtml(initialSnap);
+    setOverlayDraftExpanded(initialSnap.currentDraft !== null);
+    sendSnapshot(initialSnap);
     // Milestone 9+: the window was already created at the right *size* for
     // overlaySettings (createWindow used it directly), but the renderer
     // still needs telling what font-size/opacity that corresponds to -
     // this is that one-time initial push, mirroring what applyOverlaySettings
-    // sends on every later change.
+    // sends on every later change. setOverlayDraftExpanded above already
+    // pushed this if the window just got resized for a resumed draft; this
+    // still runs unconditionally since it's a no-op in that case (same
+    // values) and is the only push at all in the (overwhelmingly common)
+    // no-resumed-draft case.
     const preset = SIZE_PRESETS[overlaySettings.sizePreset] ?? SIZE_PRESETS[DEFAULT_SIZE_PRESET];
     mainWindow?.webContents.send("settings", { fontSizePx: BASE_FONT_PX * preset.scale, opacity: overlaySettings.opacity });
   });
@@ -1483,13 +1576,21 @@ app.whenReady().then(() => {
     watchingStatus = `Watching: ${pipeline.located.path}`;
     pipeline.on("domainEvent", (event) => {
       liveState.record(event);
-      sendSnapshot();
-      // Only these three kinds can change what the draft-progress page
-      // should show (see LiveStateTracker.record) - no point re-reading the
-      // ~27k-row card catalog on every unrelated match/game-state event.
+      const snap = liveState.snapshot();
+      // Only these three kinds can change what the draft-progress page/
+      // draft board should show (see LiveStateTracker.record) - no point
+      // re-reading the ~27k-row card catalog on every unrelated
+      // match/game-state event.
       if (event.kind === "DraftPackSeen" || event.kind === "DraftPickMade" || event.kind === "DraftCompleted") {
-        regenerateDraftProgressPage();
+        regenerateDraftProgressPage(snap);
+        refreshDraftBoardHtml(snap);
       }
+      // Milestone 23: grows/shrinks the overlay the instant a draft
+      // starts/ends - cheap no-op check (setOverlayDraftExpanded bails
+      // immediately if nothing's actually changing) so this is safe to call
+      // on every event, not just the three draft-relevant kinds above.
+      setOverlayDraftExpanded(snap.currentDraft !== null);
+      sendSnapshot(snap);
     });
     pipeline.on("error", (err) => console.error("Tailer error:", err));
     pipeline.start();

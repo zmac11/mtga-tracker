@@ -31,6 +31,16 @@
         <span class="draft-picked" id="draft-picked"></span>
       </div>
 
+      <!-- Milestone 23: the expanded draft board - every pack seen so far
+           (last-seen state), which cards were picked from each, and colors
+           taken. Only shown (and the window only grown to make room for it -
+           see electron/main.ts's setOverlayDraftExpanded) while a draft is
+           actually in progress. Its content is a pre-rendered, trusted HTML
+           fragment pushed from the main process (draftBoardFragmentHtml in
+           draftProgressHtml.ts) - see overlay-renderer.js's render() for why
+           innerHTML is safe here. -->
+      <div id="draft-board" class="draft-board hidden"></div>
+
       <div id="event-record" class="event-record hidden" title="Click to view this event's deck (unlock the overlay first - Cmd/Ctrl+Shift+O)">
         <span class="event-name" id="event-name"></span>
         <span class="event-wl" id="event-wl"></span>

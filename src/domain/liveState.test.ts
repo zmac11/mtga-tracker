@@ -275,6 +275,23 @@ function run() {
   assert.equal(snap.currentDraft?.pick, 2);
   assert.deepEqual(snap.currentDraft?.packCards, [104, 105]);
 
+  // Milestone 23: packsSeen carries the full pack-seen history (both packs
+  // so far), not just the current one.
+  assert.deepEqual(snap.currentDraft?.packsSeen, [
+    { pack: 1, pick: 1, packCards: [101, 102, 103] },
+    { pack: 1, pick: 2, packCards: [104, 105] },
+  ]);
+
+  // A wheeled-back pack 1/pick 1 (fewer cards left this time around) should
+  // UPDATE that packsSeen entry in place to its latest-seen state, not
+  // duplicate it - same "last-seen state" convention as `picks`.
+  t.record({ kind: "DraftPackSeen", draftId: "draftA", pack: 1, pick: 1, packCards: [103], ts: "d2b" });
+  snap = t.snapshot();
+  assert.deepEqual(snap.currentDraft?.packsSeen, [
+    { pack: 1, pick: 1, packCards: [103] },
+    { pack: 1, pick: 2, packCards: [104, 105] },
+  ]);
+
   // Draft finishes - no longer "current", whatever else happens to the state above.
   t.record({ kind: "DraftCompleted", eventName: "Event6", courseId: "course-6", cardPool: [101, 104], draftId: "draftA", ts: "d3" });
   snap = t.snapshot();
@@ -285,6 +302,7 @@ function run() {
   t.record({ kind: "DraftPackSeen", draftId: "draftB", pack: 1, pick: 1, packCards: [201, 202], ts: "d4" });
   snap = t.snapshot();
   assert.equal(snap.currentDraft?.draftId, "draftB");
+  assert.deepEqual(snap.currentDraft?.packsSeen, [{ pack: 1, pick: 1, packCards: [201, 202] }]);
 
   // seedHistory resuming a genuinely still-in-progress draft: unlike a
   // finished match's HUD (deliberately not resumed - see seedHistory's own
@@ -306,6 +324,10 @@ function run() {
   assert.equal(draftSnap.currentDraft?.pack, 1);
   assert.equal(draftSnap.currentDraft?.pick, 2);
   assert.deepEqual(draftSnap.currentDraft?.picks, [{ pack: 1, pick: 1, grpIds: [10] }]);
+  assert.deepEqual(draftSnap.currentDraft?.packsSeen, [
+    { pack: 1, pick: 1, packCards: [10, 11] },
+    { pack: 1, pick: 2, packCards: [12, 13] },
+  ]);
 
   // seedHistory with ONLY a completed draft (no later activity at all) - must not resume as live.
   const freshCompletedDraft = new LiveStateTracker();
@@ -323,6 +345,7 @@ function run() {
   pickTwoDraft.record({ kind: "DraftPickMade", draftId: "draftP2", pack: 1, pick: 1, grpIds: [1, 2], success: true, ts: "p1" });
   const pickTwoSnap = pickTwoDraft.snapshot();
   assert.deepEqual(pickTwoSnap.currentDraft?.picks, [{ pack: 1, pick: 1, grpIds: [1, 2] }]);
+  assert.deepEqual(pickTwoSnap.currentDraft?.packsSeen, [{ pack: 1, pick: 1, packCards: [1, 2, 3, 4] }]);
 
   // Milestone 18 (Bo3 readiness): a synthetic Bo3-shaped match - three
   // MatchScope_Game entries plus one MatchScope_Match entry (same real

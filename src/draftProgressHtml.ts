@@ -40,6 +40,16 @@ export interface DraftProgressPick {
   cards: DraftProgressCard[];
 }
 
+/** Milestone 23: one entry in the full pack-seen history (see DraftProgress.packsSeen's doc comment in liveState.ts), resolved to real card data. */
+export interface DraftProgressPackSeen {
+  pack: number;
+  pick: number;
+  /** This pack's cards, in whatever state they were last seen (a wheeled-back pack may have fewer than it started with). */
+  cards: DraftProgressCard[];
+  /** Which of this exact pack's cards were picked from it (almost always 0 or 1 - "Pick Two" draft can be 2; 0 for a pack not yet picked from, or wheeled past without a pick captured). */
+  pickedCardIds: number[];
+}
+
 export interface DraftProgressData {
   draftId: string;
   pack: number;
@@ -50,6 +60,8 @@ export interface DraftProgressData {
   picks: DraftProgressPick[];
   /** Evolving read on colors from picks so far - deckColors.ts's deriveDeckColors().comboKey, treating each pick as one copy. */
   colorCombo: string;
+  /** Milestone 23: every pack seen so far this draft (in last-seen state), resolved to real card data, in pack/pick order - see DraftProgress.packsSeen in liveState.ts. */
+  packsSeen: DraftProgressPackSeen[];
 }
 
 function packCardHtml(card: DraftProgressCard): string {
@@ -76,6 +88,71 @@ function pickRowHtml(entry: DraftProgressPick): string {
     </li>`,
     )
     .join("");
+}
+
+function packSeenCardHtml(card: DraftProgressCard, picked: boolean): string {
+  return `
+    <li class="card-row${picked ? " picked" : ""}" tabindex="0">
+      ${colorDotsHtml(card.colors)}
+      <span class="name">${escapeHtml(card.name)}</span>
+      ${picked ? `<span class="picked-badge" title="Picked from this pack">&#10003;</span>` : ""}
+      <div class="preview">${cardPreviewInnerHtml(card)}</div>
+    </li>`;
+}
+
+/** Milestone 23: one pack's worth of rows for the "All packs seen" column - every card that was in it, with whichever were picked marked. */
+function packSeenGroupHtml(entry: DraftProgressPackSeen): string {
+  return `
+    <li class="pack-group">
+      <div class="pack-group-label">P${entry.pack}p${entry.pick}</div>
+      <ul class="card-list">
+        ${entry.cards.map((c) => packSeenCardHtml(c, entry.pickedCardIds.includes(c.cardId))).join("")}
+      </ul>
+    </li>`;
+}
+
+/**
+ * Milestone 23: a compact HTML fragment (no page wrapper, no <style>/<script>
+ * of its own) for the overlay HUD's expanded draft-board panel - deliberately
+ * the same resolved DraftProgressData as the full page above, just a much
+ * terser render meant to fit a small always-on-top window. The overlay's own
+ * static overlay.css supplies the look (class names below are styled there);
+ * this only ever returns a DOM fragment string that electron/main.ts pushes
+ * over IPC for overlay-renderer.js to drop straight into the panel via
+ * innerHTML - same "server renders trusted, already-escaped HTML, the
+ * Electron layer just moves it" split as every other generated-HTML surface
+ * in this project (deckShareHtml.ts's per-deck fragments, etc.).
+ */
+export function draftBoardFragmentHtml(data: DraftProgressData): string {
+  // Newest pack first, same "what's most relevant right now" convention as
+  // the full page's picks-newest-first column.
+  const packsNewestFirst = [...data.packsSeen].reverse();
+  return `
+    <div class="db-head">
+      <span class="db-pack-pick">Pack ${data.pack}, Pick ${data.pick}</span>
+      <span class="db-colors">${escapeHtml(data.colorCombo || "No colors yet")}</span>
+    </div>
+    <ul class="db-packs">
+      ${packsNewestFirst
+        .map(
+          (entry) => `
+        <li class="db-pack">
+          <div class="db-pack-label">P${entry.pack}p${entry.pick}</div>
+          <ul class="db-cards">
+            ${entry.cards
+              .map(
+                (c) => `
+              <li class="db-card${entry.pickedCardIds.includes(c.cardId) ? " picked" : ""}">
+                ${colorDotsHtml(c.colors)}
+                <span class="db-name">${escapeHtml(c.name)}</span>
+              </li>`,
+              )
+              .join("")}
+          </ul>
+        </li>`,
+        )
+        .join("")}
+    </ul>`;
 }
 
 /**
@@ -117,6 +194,9 @@ export function generateDraftProgressHtml(data: DraftProgressData): string {
   // Cards taken, not pick actions - the same thing for a normal 1-card
   // draft, but a "Pick Two" pick should count as 2 here, not 1.
   const cardsTaken = data.picks.reduce((n, p) => n + p.cards.length, 0);
+  // Milestone 23: same newest-first convention as picks, for the new "every
+  // pack seen so far" column.
+  const packsSeenNewestFirst = [...data.packsSeen].reverse();
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -141,6 +221,11 @@ ${FAVICON_LINK_TAG}
   .card-row:hover .preview, .card-row:focus .preview, .pick-row:hover .preview, .pick-row:focus .preview { display: block; }
   .pick-num { color: #8a8d99; width: 3.2em; flex-shrink: 0; font-variant-numeric: tabular-nums; }
   .name { flex: 1; }
+  .pack-group-list { list-style: none; margin: 0; padding: 0; }
+  .pack-group { margin-bottom: 14px; }
+  .pack-group-label { color: #8a8d99; font-size: 0.85em; margin-bottom: 2px; }
+  .card-row.picked { background: rgba(111, 213, 122, 0.1); }
+  .picked-badge { color: #6fd57a; flex-shrink: 0; }
   ${CARD_PREVIEW_CSS}
 </style>
 </head>
@@ -163,6 +248,13 @@ ${FAVICON_LINK_TAG}
       <h2>Picks so far <span class="muted">(newest first)</span></h2>
       <ul class="pick-list">
         ${picksNewestFirst.map(pickRowHtml).join("")}
+      </ul>
+    </section>
+
+    <section class="column">
+      <h2>All packs seen <span class="muted">(newest first)</span></h2>
+      <ul class="pack-group-list">
+        ${packsSeenNewestFirst.map(packSeenGroupHtml).join("")}
       </ul>
     </section>
   </div>

@@ -36,6 +36,11 @@ export function buildDraftProgressData(progress: DraftProgress, cardStore: CardS
   const pseudoDeck = [...pickCounts.entries()].map(([cardId, quantity]) => ({ cardId, quantity }));
   const colorCombo = deriveDeckColors(pseudoDeck, cardColors).comboKey;
 
+  // Milestone 23: which grpIds were picked at each (pack, pick), so the
+  // "all packs seen" view can mark them against the pack they came from.
+  const pickedByPackPick = new Map<string, number[]>();
+  for (const p of progress.picks) pickedByPackPick.set(`${p.pack}|${p.pick}`, p.grpIds);
+
   return {
     draftId: progress.draftId,
     pack: progress.pack,
@@ -45,5 +50,11 @@ export function buildDraftProgressData(progress: DraftProgress, cardStore: CardS
     // comment for "Pick Two" draft, where this is 2.
     picks: progress.picks.map((p) => ({ pack: p.pack, pick: p.pick, cards: p.grpIds.map(toCard) })),
     colorCombo,
+    packsSeen: progress.packsSeen.map((p) => ({
+      pack: p.pack,
+      pick: p.pick,
+      cards: p.packCards.map(toCard),
+      pickedCardIds: pickedByPackPick.get(`${p.pack}|${p.pick}`) ?? [],
+    })),
   };
 }

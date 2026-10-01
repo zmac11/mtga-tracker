@@ -183,3 +183,96 @@ body.interactive .draft-progress:hover {
 .event-wl {
   font-weight: 600;
 }
+
+/* Milestone 23: the expanded draft board - see overlay.html's comment on
+   #draft-board and electron/main.ts's setOverlayDraftExpanded for the
+   window-resize side of this. Takes up whatever extra room the window grew
+   by (flex: 1 inside .panel's column layout), scrolling internally rather
+   than growing the window further if a draft somehow runs long enough to
+   overflow it. -webkit-app-region: no-drag (like .event-record/.draft-progress
+   above) so scrolling/hovering inside it doesn't start a window drag. */
+.draft-board {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 0.6rem;
+  font-size: 1rem;
+  -webkit-app-region: no-drag;
+}
+
+.db-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  color: rgba(160, 190, 255, 0.85);
+  margin-bottom: 0.5rem;
+}
+
+.db-pack-pick {
+  font-weight: 600;
+}
+
+.db-colors {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.95em;
+}
+
+.db-packs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.db-pack {
+  margin-bottom: 0.6rem;
+}
+
+.db-pack-label {
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 0.85em;
+  margin-bottom: 0.1rem;
+}
+
+.db-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.db-card {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.1rem 0;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.db-card.picked {
+  color: rgba(255, 255, 255, 0.95);
+  font-weight: 600;
+}
+
+.db-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Same WUBRG dot colors as the deck viewer/draft progress pages
+   (htmlCardHelpers.ts's CARD_PREVIEW_CSS) - duplicated here (smaller, for
+   the HUD's scale) rather than shared, since this is plain static CSS with
+   no page-generation step to interpolate a shared constant into. */
+.db-card .dot {
+  display: inline-block;
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.db-card .dot-W { background: #f8f6d8; }
+.db-card .dot-U { background: #4fa8e0; }
+.db-card .dot-B { background: #6b6b76; }
+.db-card .dot-R { background: #e05a4f; }
+.db-card .dot-G { background: #4fae6a; }
+.db-card .dot-C { background: #55586b; }

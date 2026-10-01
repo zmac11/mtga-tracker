@@ -17,6 +17,7 @@ const els = {
   draftProgress: document.getElementById("draft-progress"),
   draftPackPick: document.getElementById("draft-pack-pick"),
   draftPicked: document.getElementById("draft-picked"),
+  draftBoard: document.getElementById("draft-board"),
 };
 
 function setStatus(text) {
@@ -25,11 +26,12 @@ function setStatus(text) {
   els.match.classList.add("hidden");
 }
 
-function render({ foundLog, watchingPath, snapshot }) {
+function render({ foundLog, watchingPath, snapshot, draftBoardHtml }) {
   if (!foundLog) {
     setStatus("Player.log not found. Enable Options > Account > Detailed Logs, then relaunch Arena.");
     els.eventRecord.classList.add("hidden");
     els.draftProgress.classList.add("hidden");
+    els.draftBoard.classList.add("hidden");
     return;
   }
 
@@ -90,6 +92,24 @@ function render({ foundLog, watchingPath, snapshot }) {
     els.draftPicked.textContent = `${cardsTaken} picked`;
   } else {
     els.draftProgress.classList.add("hidden");
+  }
+
+  // Milestone 23: the expanded draft board - draftBoardHtml is a trusted,
+  // already-escaped HTML fragment the main process generated with
+  // draftProgressHtml.ts's draftBoardFragmentHtml (same card-name/oracle
+  // data as the live draft-progress page, see draftProgressLoader.ts) and
+  // pushed alongside this same state message - never user/page-supplied, so
+  // innerHTML here is the same "server renders trusted HTML, the renderer
+  // just drops it in" pattern already used for the deck-share export. main.ts
+  // (setOverlayDraftExpanded) is what actually grows/shrinks the window to
+  // make room for this; this only ever shows/hides and fills the panel
+  // within whatever size the window currently is.
+  if (draftBoardHtml) {
+    els.draftBoard.innerHTML = draftBoardHtml;
+    els.draftBoard.classList.remove("hidden");
+  } else {
+    els.draftBoard.classList.add("hidden");
+    els.draftBoard.innerHTML = "";
   }
 }
 

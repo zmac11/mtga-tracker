@@ -64,6 +64,21 @@ export interface DraftProgress {
   packCards: number[];
   /** Every pick made so far this draft, in (pack, pick) order, deduped to the latest per (pack, pick) - same convention as eventHistory.ts. `grpIds` is almost always one card, but see types.ts's comment on DraftPickMade.grpIds for "Pick Two" draft. */
   picks: Array<{ pack: number; pick: number; grpIds: number[] }>;
+  /**
+   * Milestone 23: every DraftPackSeen for this draft, one entry per
+   * distinct (pack, pick) seen so far, in pack/pick order - the "last-seen
+   * state" of each booster, deduped the same way `picks` already is
+   * (latest DraftPackSeen wins for a given (pack, pick), so a wheeled-back
+   * pack shows however many cards were left in it the LAST time it came
+   * back around, not its original size). This is the full history
+   * LiveStateTracker was already accumulating internally (draftPacksSeen)
+   * but previously discarded down to just the latest pack before
+   * returning - see this method's own packsForDraft/latestPack below. Used
+   * to show every pack seen so far during a draft, not just the current
+   * one (feature request: "clearly see other packs ... state in which I
+   * saw them last time").
+   */
+  packsSeen: Array<{ pack: number; pick: number; packCards: number[] }>;
 }
 
 export interface OverlaySnapshot {
@@ -419,8 +434,14 @@ export class LiveStateTracker {
         .sort((a, b) => a.pack - b.pack || a.pick - b.pick)
         .map((p) => ({ pack: p.pack, pick: p.pick, grpIds: p.grpIds }));
 
+      // Milestone 23: the full pack-seen history, not just latestPack - see
+      // DraftProgress.packsSeen's doc comment above.
+      const packsSeen = dedupeLatestByKey(packsForDraft, (p) => `${p.pack}|${p.pick}`)
+        .sort((a, b) => a.pack - b.pack || a.pick - b.pick)
+        .map((p) => ({ pack: p.pack, pick: p.pick, packCards: p.packCards }));
+
       if (latestPack) {
-        currentDraft = { draftId, pack: latestPack.pack, pick: latestPack.pick, packCards: latestPack.packCards, picks };
+        currentDraft = { draftId, pack: latestPack.pack, pick: latestPack.pick, packCards: latestPack.packCards, picks, packsSeen };
       }
     }
 
