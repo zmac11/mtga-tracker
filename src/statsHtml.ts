@@ -1,5 +1,6 @@
 import type { LimitedStatsRow, StatsCardInfo } from "./domain/statsRollup.js";
 import { FAVICON_LINK_TAG } from "./faviconHtml.js";
+import type { ShareShellParts } from "./deckShareHtml.js";
 
 /**
  * Milestone 20 (2026-09-30): "Add some kind of filter for event types and
@@ -37,9 +38,10 @@ import { FAVICON_LINK_TAG } from "./faviconHtml.js";
  * small embedded array rather than looking cards up some other way, so
  * this page stays fully self-contained/offline like every other page here.
  */
-export function generateStatsHtml(rows: LimitedStatsRow[], cardCatalog: StatsCardInfo[]): string {
+export function generateStatsHtml(rows: LimitedStatsRow[], cardCatalog: StatsCardInfo[], shareShell: ShareShellParts): string {
   const dataJson = JSON.stringify(rows).replace(/</g, "\\u003c");
   const cardCatalogJson = JSON.stringify(cardCatalog).replace(/</g, "\\u003c");
+  const shareShellJson = JSON.stringify(shareShell).replace(/</g, "\\u003c");
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -101,6 +103,7 @@ ${FAVICON_LINK_TAG}
   </div>
 
   <div class="summary" id="summary"></div>
+  <button class="reset-btn" id="export-filtered-btn" style="margin-bottom:16px;" title="Downloads one combined HTML file with every run below that has a captured deck - visual layout, stats, and an Arena-importable decklist for each - viewable with or without the tracker installed.">Export filtered decks</button>
 
   <table>
     <thead>
@@ -126,11 +129,24 @@ ${FAVICON_LINK_TAG}
 
   <script id="stats-data" type="application/json">${dataJson}</script>
   <script id="card-catalog-data" type="application/json">${cardCatalogJson}</script>
+  <script id="share-shell-data" type="application/json">${shareShellJson}</script>
   <script>
     const rows = JSON.parse(document.getElementById("stats-data").textContent);
     const cardCatalog = JSON.parse(document.getElementById("card-catalog-data").textContent);
+    // Milestone 22: "I can export one deck or set of decks from my event
+    // filter" - shareShell is the {head, tail} page wrapper
+    // deckShareHtml.ts's buildShareShellParts rendered server-side, ONCE,
+    // with no per-row data in it at all - electron/main.ts embeds it here
+    // the same way it embeds the rows/cardCatalog above, so the "Export
+    // filtered decks" button below can assemble a full combined page
+    // purely client-side (head + each matching row's own pre-rendered
+    // row.shareFragmentHtml + tail) with no round-trip back into Electron
+    // - this static page has no IPC access at all (see electron/main.ts's
+    // own notes on why).
+    const shareShell = JSON.parse(document.getElementById("share-shell-data").textContent);
     const cardById = new Map(cardCatalog.map((c) => [c.cardId, c]));
     const activeColors = new Set();
+    let currentFiltered = rows;
 
     function uniqueSorted(values) {
       return [...new Set(values.filter((v) => v !== null && v !== ""))].sort();
@@ -170,6 +186,7 @@ ${FAVICON_LINK_TAG}
         return true;
       });
 
+      currentFiltered = filtered;
       const wr = winRateOf(filtered);
       const summary = document.getElementById("summary");
       const cls = wr.total === 0 ? "" : wr.wins >= wr.losses ? "pos" : "neg";
@@ -274,6 +291,24 @@ ${FAVICON_LINK_TAG}
       activeColors.clear();
       document.querySelectorAll(".chip.active").forEach((c) => c.classList.remove("active"));
       render();
+    });
+
+    document.getElementById("export-filtered-btn").addEventListener("click", () => {
+      const withDecks = currentFiltered.filter((r) => r.shareFragmentHtml);
+      if (withDecks.length === 0) {
+        alert("No decks to export for the current filter - none of the matching runs have a captured deck.");
+        return;
+      }
+      const html = shareShell.head + withDecks.map((r) => r.shareFragmentHtml).join("") + shareShell.tail;
+      const blob = new Blob([html], { type: "text/html" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "mtga-shared-decks.html";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
     });
 
     render();

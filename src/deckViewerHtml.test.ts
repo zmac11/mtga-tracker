@@ -269,8 +269,16 @@ function run() {
   // The overall header record is still the ORIGINAL data.winRate (4-2), not derived from the versions.
   assert.ok(twoVersions.includes("4-2"));
 
+  // Milestone 22: the "Share this deck" link only renders when the caller
+  // (writeDeckViewerPage in electron/main.ts) actually wrote a sibling
+  // share page and passed its filename - no shareFileName, no link at all.
+  assert.ok(!html.includes("Share this deck"));
+  const withShare = generateDeckViewerHtml({ ...data, shareFileName: "ContenderDraft_HOB_20260824.share.html" });
+  assert.ok(withShare.includes("Share this deck"));
+  assert.ok(withShare.includes('href="ContenderDraft_HOB_20260824.share.html"'));
+
   console.log(
-    "OK: generateDeckViewerHtml renders header/record/colors (plus splash colors when present), maindeck+sideboard card rows grouped by type (image or oracle-text hover fallback), curve buckets, the Visual tab's overlapping mana-cost columns (lands as their own column, not a section) with a top-of-art quantity badge shared with the hover preview, JS-driven hover targeting that isn't fooled by an already-elevated card, the creature/spell 'Separate' toggle's boundary-only CSS rule (not a duplicated layout), configurable card width/overlap, the no-sideboard-captured message, escapes card names, hides the Draft tab with no draft data, renders pack/pick/wheel info when draft data is present, highlights both cards of a multi-card 'Pick Two' pick, shows avg mana value/entry/reward only when captured, and renders a Versions tab only when more than one deck version was actually played, without disturbing the run's overall header record.",
+    "OK: generateDeckViewerHtml renders header/record/colors (plus splash colors when present), maindeck+sideboard card rows grouped by type (image or oracle-text hover fallback), curve buckets, the Visual tab's overlapping mana-cost columns (lands as their own column, not a section) with a top-of-art quantity badge shared with the hover preview, JS-driven hover targeting that isn't fooled by an already-elevated card, the creature/spell 'Separate' toggle's boundary-only CSS rule (not a duplicated layout), configurable card width/overlap, the no-sideboard-captured message, escapes card names, hides the Draft tab with no draft data, renders pack/pick/wheel info when draft data is present, highlights both cards of a multi-card 'Pick Two' pick, shows avg mana value/entry/reward only when captured, and renders a Versions tab only when more than one deck version was actually played, without disturbing the run's overall header record. and renders a 'Share this deck' link only when a shareFileName was passed.",
   );
 }
 

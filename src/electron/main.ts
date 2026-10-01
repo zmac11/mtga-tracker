@@ -13,12 +13,15 @@ import { extractArenaCards } from "../cards/extractArenaCards.js";
 import { enrichCards } from "../cards/scryfallEnrich.js";
 import { buildDeckViewerData } from "../deckViewerLoader.js";
 import { generateDeckViewerHtml } from "../deckViewerHtml.js";
+import { buildShareShellParts, generateDeckShareHtml, renderShareSectionHtml, type ShareDeckData } from "../deckShareHtml.js";
+import { buildArenaImportText, type ArenaExportCardInfo } from "../domain/arenaExport.js";
+import type { ViewerCard } from "../deckViewerHtml.js";
 import { buildDraftProgressData } from "../draftProgressLoader.js";
 import { generateDraftProgressHtml, generateNoDraftInProgressHtml } from "../draftProgressHtml.js";
 import { loadEventHistorySource } from "../eventHistoryLoader.js";
 import { listEventRuns, buildEventRunHistory } from "../domain/eventHistory.js";
 import { generatePastEventsHtml, type PastEventRow } from "../pastEventsHtml.js";
-import { buildLimitedStatsRows, buildStatsCardCatalog } from "../domain/statsRollup.js";
+import { buildLimitedStatsRows, buildStatsCardCatalog, winRateOf } from "../domain/statsRollup.js";
 import { generateStatsHtml } from "../statsHtml.js";
 import { buildOpponentMatchRows } from "../domain/opponentStats.js";
 import { generateOpponentHtml } from "../opponentHtml.js";
@@ -1077,22 +1080,54 @@ app.whenReady().then(() => {
   // on click, not something that needs to stay open, and keeping it
   // separate avoids any risk of interfering with the pipeline's own
   // long-lived connection.
-  function writeDeckViewerPage(eventId: string, store: TypedEventStore, cardStore: CardStore, courseId?: string | null): { ok: true; outPath: string; fileName: string } | { ok: false; reason: string } {
+  function writeDeckViewerPage(eventId: string, store: TypedEventStore, cardStore: CardStore, courseId?: string | null): { ok: true; outPath: string; fileName: string; shareFileName: string } | { ok: false; reason: string } {
     const cardImageWidthPx = (CARD_SIZE_PRESETS[overlaySettings.cardSizePreset] ?? CARD_SIZE_PRESETS[DEFAULT_CARD_SIZE_PRESET]).widthPx;
     const data = buildDeckViewerData(eventId, store, cardStore, cardImageWidthPx, courseId);
     if (!data) return { ok: false, reason: `No deck/draft data captured yet for ${eventId}.` };
 
-    const html = generateDeckViewerHtml({ ...data, appVersion: app.getVersion() });
     const outDir = join(pipeline.dataDir, "deck-viewer");
     mkdirSync(outDir, { recursive: true });
     // Milestone 19: courseId-suffixed filename only when one was actually
     // passed (a real, disambiguated run - see buildDeckViewerData's own
     // comment) - the ordinary single-course case keeps its original,
     // stable filename exactly as before.
-    const fileName = courseId ? `${eventId.replace(/[^A-Za-z0-9_-]/g, "_")}__${courseId.replace(/[^A-Za-z0-9_-]/g, "_")}.html` : `${eventId.replace(/[^A-Za-z0-9_-]/g, "_")}.html`;
+    const baseName = courseId ? `${eventId.replace(/[^A-Za-z0-9_-]/g, "_")}__${courseId.replace(/[^A-Za-z0-9_-]/g, "_")}` : `${eventId.replace(/[^A-Za-z0-9_-]/g, "_")}`;
+    const fileName = `${baseName}.html`;
     const outPath = join(outDir, fileName);
+
+    // Milestone 22: alongside the normal (tracker-only) deck-viewer page,
+    // also write a "share" sibling - a single self-contained page anyone
+    // can open (tracker installed or not), linked from the normal page's
+    // own header. Built from a setCode/collectorNumber lookup over the
+    // whole card catalog (ViewerCard itself doesn't carry those fields -
+    // see domain/arenaExport.ts's header comment for why).
+    const cardInfo = new Map<number, ArenaExportCardInfo>();
+    for (const c of cardStore.all()) cardInfo.set(c.grpId, { setCode: c.setCode, collectorNumber: c.collectorNumber });
+    const arenaImportText = buildArenaImportText(data.mainDeck, data.sideboard, cardInfo);
+    const shareData: ShareDeckData = {
+      eventId: data.eventId,
+      format: data.format,
+      definitionLabel: data.definitionLabel,
+      deckName: data.deckName,
+      colorCombo: data.colorCombo,
+      splashColors: data.splashColors,
+      winRate: data.winRate,
+      mainDeck: data.mainDeck,
+      sideboard: data.sideboard,
+      cardImageWidthPx: data.cardImageWidthPx,
+      avgManaValue: data.avgManaValue,
+      entry: data.entry,
+      reward: data.reward,
+      runLabel: data.runLabel,
+      arenaImportText,
+      appVersion: app.getVersion(),
+    };
+    const shareFileName = `${baseName}.share.html`;
+    writeFileSync(join(outDir, shareFileName), generateDeckShareHtml(shareData), "utf8");
+
+    const html = generateDeckViewerHtml({ ...data, appVersion: app.getVersion(), shareFileName });
     writeFileSync(outPath, html, "utf8");
-    return { ok: true, outPath, fileName };
+    return { ok: true, outPath, fileName, shareFileName };
   }
 
   ipcMain.handle("open-deck-viewer", () => {
@@ -1299,10 +1334,36 @@ app.whenReady().then(() => {
       const source = loadEventHistorySource(store);
       const cardColors = new Map<number, string[]>();
       const cardsById = new Map<number, { name: string; colors: string[] }>();
+      // Milestone 22: also keyed for two more things the per-row "export
+      // filtered decks" share fragment below needs that the trimmed
+      // name/colors map above doesn't carry - the full ViewerCard shape
+      // (types/manaCost/oracleText/imageNormal, for the Visual tab's card
+      // grid) and the setCode/collectorNumber lookup domain/arenaExport.ts
+      // needs for the Arena-import text. One pass over the catalog builds
+      // all three maps at once rather than three separate passes.
+      const cardInfoById = new Map<number, { name: string; colors: string[]; types: string[]; manaCost: string | null; oracleText: string | null; imageNormal: string | null }>();
+      const arenaLookup = new Map<number, ArenaExportCardInfo>();
       for (const c of cardStore.all()) {
         cardColors.set(c.grpId, c.colors);
         cardsById.set(c.grpId, { name: c.name, colors: c.colors });
+        cardInfoById.set(c.grpId, { name: c.name, colors: c.colors, types: c.types, manaCost: c.manaCost, oracleText: c.oracleText, imageNormal: c.imageNormal });
+        arenaLookup.set(c.grpId, { setCode: c.setCode, collectorNumber: c.collectorNumber });
       }
+      const toViewerCards = (entries: Array<{ cardId: number; quantity: number }>): ViewerCard[] =>
+        entries.map((e) => {
+          const info = cardInfoById.get(e.cardId);
+          return {
+            cardId: e.cardId,
+            quantity: e.quantity,
+            name: info?.name ?? `Unknown card #${e.cardId}`,
+            colors: info?.colors ?? [],
+            types: info?.types ?? [],
+            manaCost: info?.manaCost ?? null,
+            oracleText: info?.oracleText ?? null,
+            imageNormal: info?.imageNormal ?? null,
+          };
+        });
+
       const rows = buildLimitedStatsRows(source, cardColors);
       // Milestone 20 follow-up: "I want to be able to open decks from
       // limited filter" - write (or refresh) each row's own deck-viewer
@@ -1312,13 +1373,37 @@ app.whenReady().then(() => {
       // (shouldn't happen for a listed run, but never let one bad run
       // break the whole page) just keeps its default null - statsHtml.ts
       // already renders the deck name as plain text in that case.
+      //
+      // Milestone 22: also pre-render each row's own "export filtered
+      // decks" share fragment (same visual layout as the single-deck
+      // share page, just the inner section - see deckShareHtml.ts's
+      // header comment) here, server-side, once - a row with no deck
+      // captured at all (empty mainDeck) gets null, same "just omit it"
+      // convention as deckViewerFileName right above it.
       const linkedRows = rows.map((row) => {
         const written = writeDeckViewerPage(row.eventId, store!, cardStore!, row.courseId);
-        return { ...row, deckViewerFileName: written.ok ? written.fileName : null };
+        const mainDeckViewerCards = toViewerCards(row.mainDeck);
+        const shareFragmentHtml =
+          mainDeckViewerCards.length > 0
+            ? renderShareSectionHtml({
+                eventId: row.eventId,
+                format: row.format,
+                definitionLabel: row.definitionLabel,
+                deckName: row.deckName,
+                colorCombo: row.colorCombo,
+                splashColors: row.splashColors,
+                winRate: winRateOf([{ wins: row.wins, losses: row.losses }]),
+                mainDeck: mainDeckViewerCards,
+                sideboard: null,
+                arenaImportText: buildArenaImportText(mainDeckViewerCards, null, arenaLookup),
+              })
+            : null;
+        return { ...row, deckViewerFileName: written.ok ? written.fileName : null, shareFragmentHtml };
       });
       const cardCatalog = buildStatsCardCatalog(linkedRows, cardsById);
+      const shareShell = buildShareShellParts("Shared decks - MTGA Tracker");
 
-      const html = generateStatsHtml(linkedRows, cardCatalog);
+      const html = generateStatsHtml(linkedRows, cardCatalog, shareShell);
       const outDir = join(pipeline.dataDir, "stats");
       mkdirSync(outDir, { recursive: true });
       const outPath = join(outDir, "limited-stats.html");

@@ -133,6 +133,8 @@ export interface DeckViewerData {
   appVersion?: string;
   /** Milestone 19 (2026-09-30): "run started <when>" - set only when Arena reused this eventId across more than one real course and this page is for one specific course (see domain/courseRuns.ts) - shown in the header so two pages that would otherwise look identical are distinguishable. Omitted/null for the overwhelmingly common single-course case. */
   runLabel?: string | null;
+  /** Milestone 22 (2026-10-01): the sibling "share" page's filename (see deckShareHtml.ts), written alongside this page in the same directory by writeDeckViewerPage in electron/main.ts - rendered as a plain relative link in the tab bar so a tracker user can get to the shareable version with one click. Omitted for an older caller/test that doesn't pass one, in which case no link is shown at all. */
+  shareFileName?: string;
 }
 
 /** Milestone 17: one played deck version, already resolved to full ViewerCards (same shape the "Deck list"/"Visual"/"Curve" tabs use) for the "Versions" tab to render with the existing deckListHtml. */
@@ -155,6 +157,148 @@ export interface DeckViewerReward {
 
 /** Milestone 13: the "Visual" tab's default card-thumbnail width, used whenever DeckViewerData.cardImageWidthPx is omitted. Also the fallback main.ts's CARD_SIZE_PRESETS resolves to if the persisted setting is ever missing/invalid. */
 export const DEFAULT_CARD_IMAGE_WIDTH_PX = 130;
+
+/**
+ * Milestone 22 (2026-10-01): extracted out of generateDeckViewerHtml's
+ * inline <style>/<script> blocks so the new single-deck "share" page
+ * (deckShareHtml.ts) can render an identical Visual tab without
+ * duplicating this CSS/JS - same "pull into a shared constant once a
+ * second page needs it" convention CARD_PREVIEW_CSS/CARD_PREVIEW_JS
+ * already established in htmlCardHelpers.ts. Content is byte-for-byte
+ * what generateDeckViewerHtml already emitted before this extraction -
+ * this is a pure refactor, not a behavior change (see
+ * deckViewerHtml.test.ts, unchanged by this split).
+ */
+export const VISUAL_TAB_CSS = `  .visual-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+  .toggle-btn { background: #22232c; color: #e8e8ec; border: 1px solid #34364280; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.85rem; }
+  .toggle-btn.active { background: #3d4ee0; border-color: #3d4ee0; }
+  .visual-columns { display: flex; gap: 20px; align-items: flex-start; overflow-x: auto; padding-bottom: 8px; }
+  .visual-column { display: flex; flex-direction: column; flex: 0 0 auto; width: var(--card-img-width); }
+  .visual-column-header { text-align: center; font-size: 0.8rem; color: #8a8d99; padding-bottom: 4px; margin-bottom: 14px; border-bottom: 1px solid #2a2c36; }
+  /* Fanned/overlapping stack: every card after the first in a column pulls up
+     over the previous card's bottom (via the negative --card-overlap margin),
+     so only a sliver of each earlier card peeks out above the next one -
+     matching the Arena deck-builder screenshot this tab is modeled on. The
+     card lowest in a column's stack is the one shown in full; hovering any
+     card lifts it (z-index + a small translateY) above the ones after it so
+     it can be seen whole without leaving the stack. Milestone 15: "hovering"
+     here means the JS-driven .is-hovered class (see initVisualHover below),
+     not plain CSS :hover - see that function's comment for why. */
+  .visual-column-cards { display: flex; flex-direction: column; }
+  .visual-card { position: relative; transition: transform 120ms ease; }
+  .visual-card:not(:first-child) { margin-top: var(--card-overlap); }
+  .visual-card.is-hovered, .visual-card:focus { z-index: 30; transform: translateY(-6px); }
+  .visual-card img { width: 100%; border-radius: 6px; display: block; box-shadow: 0 2px 6px rgba(0,0,0,0.5); }
+  .visual-card.is-hovered img, .visual-card:focus img { box-shadow: 0 10px 24px rgba(0,0,0,0.65); }
+  .visual-card.is-hovered .preview, .visual-card:focus .preview { display: block; }
+  .visual-card-placeholder { width: var(--card-img-width); aspect-ratio: 5 / 7; background: #22232c; border: 1px solid #34364280; border-radius: 6px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 6px; text-align: center; font-size: 0.7rem; }
+  /* "Separate creatures / spells": same layout either way (see the header
+     comment) - this just opens a small gap at the one card immediately
+     after the last creature in a column, instead of the usual overlap. */
+  .visual-section.separated .visual-card[data-role="creature"] + .visual-card[data-role="spell"] { margin-top: 18px; }`;
+
+/** See VISUAL_TAB_CSS's comment above - same extraction, for the Visual tab's JS (the "Separate creatures / spells" toggle and the fanned-stack hover-targeting logic). Callers must still invoke `initVisualHover()` themselves once this is inlined into a <script> block (see generateDeckViewerHtml below for the usual place to do that) - that one call wasn't swept into this constant since a page with no Visual tab at all (none exist yet, but kept consistent) shouldn't be forced to run it. */
+export const VISUAL_TAB_JS = `    function toggleVisualSeparate() {
+      var section = document.getElementById('visual-section');
+      var btn = document.getElementById('visual-separate-btn');
+      var nowSeparated = !section.classList.contains('separated');
+      section.classList.toggle('separated', nowSeparated);
+      btn.classList.toggle('active', nowSeparated);
+      btn.textContent = nowSeparated ? 'Show combined' : 'Separate creatures / spells';
+    }
+    // Milestone 15: the Visual tab's fanned/overlapping card stacks made
+    // plain CSS :hover ambiguous while moving the cursor down a column.
+    // Hovering a card lifts it with a high z-index so its full art shows -
+    // but that elevation makes its *entire* card-height hit-test box (not
+    // just the sliver that's visually its own) paint on top of every card
+    // below it too, so the cursor can keep "hovering" that earlier card even
+    // once it's visually over a later one's face. Fixed by not using :hover
+    // to drive this at all: a per-column mousemove listener figures out
+    // which card the cursor is really over by checking each card's current
+    // rect from the back of the stack forward (later cards paint on top by
+    // default - that's the whole point of the fan - so checking them first
+    // finds the right one regardless of any hover-elevation elsewhere in the
+    // column) and toggles a plain .is-hovered class. While the cursor is over
+    // the open preview panel itself, the handler leaves the active card
+    // alone rather than trying to resolve it against the column's cards (the
+    // preview renders outside the column's own width) - so looking closer at
+    // the zoomed art doesn't dismiss it, and it's never what decides which
+    // card counts as "hovered" either.
+    function initVisualHover() {
+      document.querySelectorAll('.visual-column-cards').forEach(function (col) {
+        var cards = Array.prototype.slice.call(col.querySelectorAll('.visual-card'));
+        var active = null;
+        function setActive(card) {
+          if (active === card) return;
+          if (active) active.classList.remove('is-hovered');
+          active = card;
+          if (active) {
+            active.classList.add('is-hovered');
+            // Milestone 16: the plain mouseover/focusin delegation in
+            // CARD_PREVIEW_JS can't catch this trigger - visibility here is
+            // driven by the JS-toggled .is-hovered class above, not a native
+            // :hover match - so call it directly, right after the class that
+            // actually makes the preview visible.
+            positionPreview(active);
+          }
+        }
+        col.addEventListener('mousemove', function (e) {
+          if (e.target && e.target.closest && e.target.closest('.preview')) return;
+          var target = null;
+          for (var i = cards.length - 1; i >= 0; i--) {
+            var rect = cards[i].getBoundingClientRect();
+            if (e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom) {
+              target = cards[i];
+              break;
+            }
+          }
+          setActive(target);
+        });
+        col.addEventListener('mouseleave', function () { setActive(null); });
+      });
+    }
+`;
+
+/**
+ * Milestone 22 (2026-10-01): the "header" block (deck name, format, colors,
+ * record, and the milestone-17 header extras) extracted out of
+ * generateDeckViewerHtml so the new single-deck "share" page
+ * (deckShareHtml.ts) renders an identical header without duplicating this
+ * logic - same extraction convention as VISUAL_TAB_CSS/VISUAL_TAB_JS above.
+ * Takes a structural subset of DeckViewerData (every field a plain object
+ * literal or a ShareDeckData satisfies too) rather than the full interface,
+ * so callers that don't have e.g. draft/versions data can still use it.
+ */
+export interface DeckHeaderData {
+  eventId: string;
+  format: string;
+  definitionLabel: string;
+  deckName: string | null;
+  colorCombo: string;
+  splashColors?: string[];
+  winRate: { wins: number; losses: number; total: number; pct: string };
+  avgManaValue?: AverageManaValue;
+  entry?: { currencyType: string; amountPaid: number } | null;
+  reward?: DeckViewerReward | null;
+  runLabel?: string | null;
+}
+
+export function renderDeckHeaderHtml(data: DeckHeaderData): string {
+  const { wins, losses, total, pct } = data.winRate;
+  const recordLine = total > 0 ? `${wins}-${losses} (${pct} over ${total} decided match${total === 1 ? "" : "es"})` : `${wins}-${losses} (no decided matches yet)`;
+  const splashColors = data.splashColors ?? [];
+  const splashLine = splashColors.length > 0 ? ` <span class="muted">(splash: ${splashColors.map((c) => escapeHtml(c)).join("")})</span>` : "";
+  const avgMvLine = data.avgManaValue && data.avgManaValue.value !== null ? ` &middot; Avg. MV: <strong>${data.avgManaValue.value.toFixed(2)}</strong>` : "";
+  const entryLine = data.entry ? ` &middot; Entry: <strong>${data.entry.amountPaid} ${escapeHtml(data.entry.currencyType)}</strong>` : "";
+  const rewardText = data.reward ? formatReward(data.reward) : null;
+  const rewardLine = rewardText ? ` &middot; Reward: <strong>${rewardText}</strong>` : "";
+
+  return `<div class="header">
+    <h1>${escapeHtml(data.deckName ?? "(no deck submission captured)")}</h1>
+    <div class="meta">[${escapeHtml(data.format)}] ${escapeHtml(data.definitionLabel)} &middot; ${escapeHtml(data.eventId)}${data.runLabel ? ` &middot; <strong>${escapeHtml(data.runLabel)}</strong>` : ""}</div>
+    <div class="meta">Colors: <strong>${escapeHtml(data.colorCombo)}</strong>${splashLine} &middot; Record: <strong>${recordLine}</strong>${avgMvLine}${entryLine}${rewardLine}</div>
+  </div>`;
+}
 
 function cardRowHtml(card: ViewerCard): string {
   return `
@@ -217,7 +361,7 @@ function classifyCardType(types: string[]): string {
  * grouping is new. A section with no cards is skipped entirely rather than
  * shown empty.
  */
-function deckListHtml(title: string, cards: ViewerCard[] | null): string {
+export function deckListHtml(title: string, cards: ViewerCard[] | null): string {
   if (cards === null) {
     return `<section class="deck-column"><h2>${escapeHtml(title)}</h2><p class="muted">Not captured for this run (no real sideboard was returned with the deck submission, and there's no drafted/opened pool to derive one from either).</p></section>`;
   }
@@ -350,7 +494,7 @@ function visualColumnHtml(bucket: CurveBucket, cardsById: Map<number, ViewerCard
     </div>`;
 }
 
-function visualHtml(mainDeck: ViewerCard[]): string {
+export function visualHtml(mainDeck: ViewerCard[]): string {
   const cardInfo = new Map<number, CardCurveInfo>();
   const cardsById = new Map<number, ViewerCard>();
   for (const c of mainDeck) {
@@ -422,7 +566,7 @@ function draftTabHtml(picks: DraftViewerPick[]): string {
 }
 
 /** Milestone 17: "650 Gems, 2x HOB Boosters" style summary for the header - see DeckViewerReward's own comment for field provenance. Returns null (not shown) rather than an empty string when there's nothing to report, so the caller can decide whether to render the separator around it. */
-function formatReward(reward: DeckViewerReward): string | null {
+export function formatReward(reward: DeckViewerReward): string | null {
   const parts: string[] = [];
   if (reward.gems > 0) parts.push(`${reward.gems} Gems`);
   if (reward.gold > 0) parts.push(`${reward.gold} Gold`);
@@ -459,20 +603,7 @@ function versionsTabHtml(versions: DeckViewerVersion[]): string {
 }
 
 export function generateDeckViewerHtml(data: DeckViewerData): string {
-  const { wins, losses, total, pct } = data.winRate;
-  const recordLine = total > 0 ? `${wins}-${losses} (${pct} over ${total} decided match${total === 1 ? "" : "es"})` : `${wins}-${losses} (no decided matches yet)`;
   const cardImageWidthPx = data.cardImageWidthPx ?? DEFAULT_CARD_IMAGE_WIDTH_PX;
-  const splashColors = data.splashColors ?? [];
-  const splashLine = splashColors.length > 0 ? ` <span class="muted">(splash: ${splashColors.map((c) => escapeHtml(c)).join("")})</span>` : "";
-  // Milestone 17: header extras - each renders as its own "&middot; label:
-  // value" fragment, only when there's actually something to show (an
-  // avgManaValue with nothing considered, a missing entry/reward capture,
-  // etc. all just omit their fragment rather than showing a "0"/"-" that
-  // would misleadingly read as a real captured zero).
-  const avgMvLine = data.avgManaValue && data.avgManaValue.value !== null ? ` &middot; Avg. MV: <strong>${data.avgManaValue.value.toFixed(2)}</strong>` : "";
-  const entryLine = data.entry ? ` &middot; Entry: <strong>${data.entry.amountPaid} ${escapeHtml(data.entry.currencyType)}</strong>` : "";
-  const rewardText = data.reward ? formatReward(data.reward) : null;
-  const rewardLine = rewardText ? ` &middot; Reward: <strong>${rewardText}</strong>` : "";
   const versions = data.versions ?? [];
 
   return `<!DOCTYPE html>
@@ -490,8 +621,9 @@ ${FAVICON_LINK_TAG}
   .header { margin-bottom: 20px; border-bottom: 1px solid #2a2c36; padding-bottom: 12px; }
   .header .meta { color: #b7bac6; font-size: 0.95rem; }
   .tabs { margin: 16px 0; }
-  .tabs button { background: #22232c; color: #e8e8ec; border: 1px solid #34364280; padding: 6px 14px; border-radius: 6px; cursor: pointer; margin-right: 8px; font-size: 0.9rem; }
+  .tabs button, .tabs a.tab-btn { background: #22232c; color: #e8e8ec; border: 1px solid #34364280; padding: 6px 14px; border-radius: 6px; cursor: pointer; margin-right: 8px; font-size: 0.9rem; }
   .tabs button.active { background: #3d4ee0; border-color: #3d4ee0; }
+  .tabs a.tab-btn { text-decoration: none; display: inline-block; margin-left: 12px; }
   .view { display: none; }
   .view.active { display: block; }
   .deck-columns { display: flex; gap: 32px; flex-wrap: wrap; }
@@ -516,33 +648,7 @@ ${FAVICON_LINK_TAG}
   .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; }
   .swatch-creature { background: #4fae6a; }
   .swatch-noncreature { background: #4fa8e0; }
-  .visual-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
-  .toggle-btn { background: #22232c; color: #e8e8ec; border: 1px solid #34364280; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.85rem; }
-  .toggle-btn.active { background: #3d4ee0; border-color: #3d4ee0; }
-  .visual-columns { display: flex; gap: 20px; align-items: flex-start; overflow-x: auto; padding-bottom: 8px; }
-  .visual-column { display: flex; flex-direction: column; flex: 0 0 auto; width: var(--card-img-width); }
-  .visual-column-header { text-align: center; font-size: 0.8rem; color: #8a8d99; padding-bottom: 4px; margin-bottom: 14px; border-bottom: 1px solid #2a2c36; }
-  /* Fanned/overlapping stack: every card after the first in a column pulls up
-     over the previous card's bottom (via the negative --card-overlap margin),
-     so only a sliver of each earlier card peeks out above the next one -
-     matching the Arena deck-builder screenshot this tab is modeled on. The
-     card lowest in a column's stack is the one shown in full; hovering any
-     card lifts it (z-index + a small translateY) above the ones after it so
-     it can be seen whole without leaving the stack. Milestone 15: "hovering"
-     here means the JS-driven .is-hovered class (see initVisualHover below),
-     not plain CSS :hover - see that function's comment for why. */
-  .visual-column-cards { display: flex; flex-direction: column; }
-  .visual-card { position: relative; transition: transform 120ms ease; }
-  .visual-card:not(:first-child) { margin-top: var(--card-overlap); }
-  .visual-card.is-hovered, .visual-card:focus { z-index: 30; transform: translateY(-6px); }
-  .visual-card img { width: 100%; border-radius: 6px; display: block; box-shadow: 0 2px 6px rgba(0,0,0,0.5); }
-  .visual-card.is-hovered img, .visual-card:focus img { box-shadow: 0 10px 24px rgba(0,0,0,0.65); }
-  .visual-card.is-hovered .preview, .visual-card:focus .preview { display: block; }
-  .visual-card-placeholder { width: var(--card-img-width); aspect-ratio: 5 / 7; background: #22232c; border: 1px solid #34364280; border-radius: 6px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 6px; text-align: center; font-size: 0.7rem; }
-  /* "Separate creatures / spells": same layout either way (see the header
-     comment) - this just opens a small gap at the one card immediately
-     after the last creature in a column, instead of the usual overlap. */
-  .visual-section.separated .visual-card[data-role="creature"] + .visual-card[data-role="spell"] { margin-top: 18px; }
+  ${VISUAL_TAB_CSS}
   .draft-picks { display: flex; flex-direction: column; gap: 20px; }
   .draft-pick { border-bottom: 1px solid #2a2c36; padding-bottom: 14px; }
   .draft-card-list { display: flex; flex-wrap: wrap; gap: 2px 18px; }
@@ -557,11 +663,7 @@ ${FAVICON_LINK_TAG}
 </style>
 </head>
 <body>
-  <div class="header">
-    <h1>${escapeHtml(data.deckName ?? "(no deck submission captured)")}</h1>
-    <div class="meta">[${escapeHtml(data.format)}] ${escapeHtml(data.definitionLabel)} &middot; ${escapeHtml(data.eventId)}${data.runLabel ? ` &middot; <strong>${escapeHtml(data.runLabel)}</strong>` : ""}</div>
-    <div class="meta">Colors: <strong>${escapeHtml(data.colorCombo)}</strong>${splashLine} &middot; Record: <strong>${recordLine}</strong>${avgMvLine}${entryLine}${rewardLine}</div>
-  </div>
+  ${renderDeckHeaderHtml(data)}
 
   <div class="tabs">
     <button class="tab-btn active" data-view="list" onclick="showView('list')">Deck list</button>
@@ -569,6 +671,7 @@ ${FAVICON_LINK_TAG}
     <button class="tab-btn" data-view="curve" onclick="showView('curve')">Curve</button>
     ${data.draft.length > 0 ? `<button class="tab-btn" data-view="draft" onclick="showView('draft')">Draft</button>` : ""}
     ${versions.length > 1 ? `<button class="tab-btn" data-view="versions" onclick="showView('versions')">Versions</button>` : ""}
+    ${data.shareFileName ? `<a class="tab-btn share-link" href="${escapeHtml(data.shareFileName)}" title="A single page anyone can open - tracker installed or not - with the Visual layout, stats, and an Arena-importable decklist.">Share this deck &#8599;</a>` : ""}
   </div>
 
   <div id="view-list" class="view active" data-view="list">
@@ -610,65 +713,7 @@ ${FAVICON_LINK_TAG}
       document.querySelectorAll('.view').forEach(function (el) { el.classList.toggle('active', el.dataset.view === name); });
       document.querySelectorAll('.tab-btn').forEach(function (el) { el.classList.toggle('active', el.dataset.view === name); });
     }
-    function toggleVisualSeparate() {
-      var section = document.getElementById('visual-section');
-      var btn = document.getElementById('visual-separate-btn');
-      var nowSeparated = !section.classList.contains('separated');
-      section.classList.toggle('separated', nowSeparated);
-      btn.classList.toggle('active', nowSeparated);
-      btn.textContent = nowSeparated ? 'Show combined' : 'Separate creatures / spells';
-    }
-    // Milestone 15: the Visual tab's fanned/overlapping card stacks made
-    // plain CSS :hover ambiguous while moving the cursor down a column.
-    // Hovering a card lifts it with a high z-index so its full art shows -
-    // but that elevation makes its *entire* card-height hit-test box (not
-    // just the sliver that's visually its own) paint on top of every card
-    // below it too, so the cursor can keep "hovering" that earlier card even
-    // once it's visually over a later one's face. Fixed by not using :hover
-    // to drive this at all: a per-column mousemove listener figures out
-    // which card the cursor is really over by checking each card's current
-    // rect from the back of the stack forward (later cards paint on top by
-    // default - that's the whole point of the fan - so checking them first
-    // finds the right one regardless of any hover-elevation elsewhere in the
-    // column) and toggles a plain .is-hovered class. While the cursor is over
-    // the open preview panel itself, the handler leaves the active card
-    // alone rather than trying to resolve it against the column's cards (the
-    // preview renders outside the column's own width) - so looking closer at
-    // the zoomed art doesn't dismiss it, and it's never what decides which
-    // card counts as "hovered" either.
-    function initVisualHover() {
-      document.querySelectorAll('.visual-column-cards').forEach(function (col) {
-        var cards = Array.prototype.slice.call(col.querySelectorAll('.visual-card'));
-        var active = null;
-        function setActive(card) {
-          if (active === card) return;
-          if (active) active.classList.remove('is-hovered');
-          active = card;
-          if (active) {
-            active.classList.add('is-hovered');
-            // Milestone 16: the plain mouseover/focusin delegation in
-            // CARD_PREVIEW_JS can't catch this trigger - visibility here is
-            // driven by the JS-toggled .is-hovered class above, not a native
-            // :hover match - so call it directly, right after the class that
-            // actually makes the preview visible.
-            positionPreview(active);
-          }
-        }
-        col.addEventListener('mousemove', function (e) {
-          if (e.target && e.target.closest && e.target.closest('.preview')) return;
-          var target = null;
-          for (var i = cards.length - 1; i >= 0; i--) {
-            var rect = cards[i].getBoundingClientRect();
-            if (e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom) {
-              target = cards[i];
-              break;
-            }
-          }
-          setActive(target);
-        });
-        col.addEventListener('mouseleave', function () { setActive(null); });
-      });
-    }
+    ${VISUAL_TAB_JS}
     initVisualHover();
   </script>
 </body>

@@ -84,6 +84,22 @@ export interface LimitedStatsRow {
    * `PastEventRow` in the sibling "Past Events" page.
    */
   deckViewerFileName: string | null;
+  /**
+   * Milestone 22 (2026-10-01): "I can export one deck or set of decks from
+   * my event filter" - a pre-rendered share-page HTML fragment for this
+   * run's deck (same visual layout + Arena-import box as the single-deck
+   * share page, deckShareHtml.ts's renderShareSectionHtml), so the Limited
+   * Stats page's "Export filtered decks" button can assemble one combined
+   * HTML file from whichever rows currently pass the live filter, entirely
+   * client-side (string concatenation + a Blob download - see
+   * statsHtml.ts), with no round-trip back into Electron (this static
+   * page has no IPC access at all - see electron/main.ts's own notes on
+   * why). Always null coming out of `buildLimitedStatsRows` below, same
+   * reasoning as `deckViewerFileName` above (a pure, file-I/O-free domain
+   * function has no card catalog to render card art from) -
+   * electron/main.ts's `openLimitedStatsPage` fills it in afterward.
+   */
+  shareFragmentHtml: string | null;
 }
 
 /** A card's basic display info, keyed by cardId - the small subset statsHtml.ts's per-card table needs, not a full EnrichedCard. */
@@ -124,6 +140,7 @@ export function buildLimitedStatsRows(source: EventHistorySource, cardColors: Ma
       mainDeck,
       deckVersions: history.deckVersions.map((v) => ({ mainDeck: v.mainDeck, wins: v.winRate.wins, losses: v.winRate.losses })),
       deckViewerFileName: null,
+      shareFragmentHtml: null,
     });
   }
   return rows;
