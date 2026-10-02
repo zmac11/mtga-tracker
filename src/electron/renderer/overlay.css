@@ -46,33 +46,46 @@ body {
   -webkit-app-region: drag;
 }
 
-/* The menu button (2026-10-02): sits in the transparent top strip, always
-   visible and always opaque enough to find over Arena. The window is
-   click-through everywhere else - overlay-renderer.js asks main.ts to make it
-   clickable only while the cursor is over this button. no-drag so a click here
-   never starts a window drag. */
+/* The menu button (2026-10-02; moved onto the panel's top-right corner and
+   enlarged the same day - it first sat in the transparent strip above the
+   panel, which read as floating outside the tracker). 1.8rem = the panel's own
+   1.4rem top margin + a 0.4rem inset, so it sits just inside the corner. The
+   window is click-through everywhere else - overlay-renderer.js asks main.ts
+   to make it clickable only while the cursor is over this button. no-drag so a
+   click here never starts a window drag. */
 .menu-btn {
   position: absolute;
-  top: 0;
-  right: 0.2rem;
+  top: 1.8rem;
+  right: 0.6rem;
   z-index: 10;
-  height: 1.6rem;
-  min-width: 2.2rem;
-  padding: 0 0.6rem;
-  font-size: 1.2rem;
-  line-height: 1.6rem;
-  color: rgba(255, 255, 255, 0.85);
-  background: rgba(12, 12, 16, 0.88);
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  border-radius: 0.6rem;
+  width: 2.6rem;
+  height: 2.6rem;
+  padding: 0;
+  font-size: 1.7rem;
+  line-height: 2.4rem;
+  text-align: center;
+  color: #fff;
+  background: rgba(45, 60, 130, 0.95);
+  border: 1.5px solid rgba(150, 185, 255, 0.95);
+  border-radius: 0.7rem;
+  box-shadow: 0 0 0.8rem rgba(110, 150, 255, 0.55);
   cursor: pointer;
   -webkit-app-region: no-drag;
 }
 
 .menu-btn:hover {
-  color: #fff;
-  background: rgba(60, 70, 120, 0.95);
-  border-color: rgba(120, 170, 255, 0.8);
+  background: rgba(75, 100, 190, 1);
+  border-color: #fff;
+  box-shadow: 0 0 1.1rem rgba(150, 185, 255, 0.9);
+}
+
+/* Keep the first row's text clear of the button in the panel's top-right corner. */
+.player.opp .name {
+  padding-right: 2rem;
+}
+
+.status {
+  padding: 0 2.6rem;
 }
 
 .panel {
