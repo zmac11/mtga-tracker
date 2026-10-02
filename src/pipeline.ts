@@ -1,6 +1,6 @@
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { EventEmitter } from "node:events";
 import { locateLogFile, type LocateResult } from "./log/logLocator.js";
 import { LogTailer } from "./log/logTailer.js";
@@ -163,15 +163,36 @@ export class CapturePipeline extends EventEmitter {
    * matches (anything carrying a matchId) - see that module's comment for
    * why this is deliberately narrower than a general re-sync.
    *
-   * Relies on Arena not having been relaunched since the missed match(es)
-   * - it rewrites Player.log from scratch on every client (re)start (see
-   * LogTailer's own comment), so anything from before that rewrite is
-   * gone from the file and simply won't be found here.
+   * Also reads Player-prev.log (the previous session's log, which Arena
+   * keeps exactly one generation of - see LogTailer's own comment) when
+   * present, so matches that finished before the tracker's last Arena
+   * relaunch are still recovered. Still bounded by Arena's own retention:
+   * anything from two or more relaunches back is gone from disk entirely
+   * and simply won't be found here.
    */
   catchUpFromLog(opts: { dryRun?: boolean } = {}): CatchUpResult {
     if (!this.located.found) return { newMatchIds: [], appendedEvents: 0, kindCounts: {} };
 
-    const fullText = readFileSync(this.located.path, "utf8");
+    // Arena rewrites Player.log from scratch on every client (re)launch -
+    // the content from before that launch is renamed to Player-prev.log
+    // (see logTailer.ts's doc comment). If the tracker was off across an
+    // Arena restart, matches that finished before the restart only exist
+    // in Player-prev.log, never in the current Player.log. Reading both
+    // (prev first, since it's the older session) and feeding them through
+    // the same parser/classifier as one continuous stream recovers those
+    // too - the existing matchId-based dedup below is file-agnostic, so
+    // this is safe to do unconditionally on every catch-up run.
+    const prevLogPath = join(dirname(this.located.path), "Player-prev.log");
+    let fullText = "";
+    if (existsSync(prevLogPath)) {
+      try {
+        fullText += readFileSync(prevLogPath, "utf8");
+      } catch {
+        // best-effort: if Player-prev.log can't be read, just skip it
+      }
+    }
+    fullText += readFileSync(this.located.path, "utf8");
+
     const parser = new LogParser();
     const classifier = new Classifier();
     const blocks: ClassifiedBlock[] = [];
