@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, screen, shell, Tray } from "electron";
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, screen, shell, Tray, type MenuItemConstructorOptions } from "electron";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -363,6 +363,12 @@ let runCardRefresh: ((skipEnrich: boolean, forceRefresh?: boolean) => void) | nu
 // top-level function, so it reaches this via the slot rather than a direct
 // reference.
 let openPastEventsPage: (() => void) | null = null;
+// 2026-10-02: the overlay's own menu button (see openOverlayMenu below) also
+// offers the two things the overlay's rows already open (current event's
+// deck, live draft progress) - assigned once the capture pipeline/live state
+// they need exist, like the page openers above.
+let openCurrentDeckViewer: (() => { ok: boolean; reason?: string }) | null = null;
+let openDraftProgressPage: (() => void) | null = null;
 // Milestone 20: same module-level slot pattern as openPastEventsPage above -
 // openLimitedStatsPage is defined inside app.whenReady() (needs pipeline),
 // but rebuildTrayMenu() is a top-level function.
@@ -765,7 +771,16 @@ function openSettingsWindow(): void {
  */
 function rebuildTrayMenu(): void {
   if (!tray) return;
-  const menu = Menu.buildFromTemplate([
+  tray.setContextMenu(Menu.buildFromTemplate(buildMenuTemplate()));
+}
+
+/**
+ * The tray menu's contents, as a template - shared by the tray itself and by
+ * the overlay's own menu button (openOverlayMenu below), so the two can never
+ * drift apart.
+ */
+function buildMenuTemplate(): MenuItemConstructorOptions[] {
+  return [
     { label: watchingStatus, enabled: false },
     { type: "separator" },
     {
@@ -852,8 +867,44 @@ function rebuildTrayMenu(): void {
     { label: "Send Feedback...", click: sendFeedback },
     { type: "separator" },
     { label: "Quit MTGA Tracker", accelerator: "CommandOrControl+Shift+Q", click: () => app.quit() },
-  ]);
-  tray.setContextMenu(menu);
+  ];
+}
+
+/**
+ * 2026-10-02: "a menu icon directly on the overlay so I can open stuff
+ * easily from MTG Arena." The overlay is click-through (so it never gets in
+ * the way of the game), which is why the menu button asks main to make the
+ * window clickable only while the cursor is actually over it
+ * (overlay-set-clickable below) - everywhere else clicks still fall through
+ * to Arena. Clicking it pops up the same menu the tray has, preceded by the
+ * two shortcuts the overlay's own rows offer (current deck, live draft).
+ * A native popup menu rather than an in-overlay dropdown: the overlay window
+ * is small and fixed-size, and this needs no extra layout or window growth.
+ * Click-through is restored when the menu closes, in case the button never
+ * receives its own mouse-leave while the menu is up.
+ */
+function openOverlayMenu(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const template: MenuItemConstructorOptions[] = [
+    {
+      label: "Current Event Deck",
+      click: () => {
+        const result = openCurrentDeckViewer?.();
+        if (result && !result.ok && Notification.isSupported()) {
+          new Notification({ title: "MTGA Tracker", body: result.reason ?? "Couldn't open the current deck." }).show();
+        }
+      },
+    },
+    { label: "Live Draft Progress", click: () => openDraftProgressPage?.() },
+    { type: "separator" },
+    ...buildMenuTemplate(),
+  ];
+  Menu.buildFromTemplate(template).popup({
+    window: mainWindow,
+    callback: () => {
+      if (mainWindow && !mainWindow.isDestroyed() && !interactive) mainWindow.setIgnoreMouseEvents(true, { forward: true });
+    },
+  });
 }
 
 function createTray(): Tray {
@@ -1273,7 +1324,7 @@ app.whenReady().then(() => {
     return { ok: true, outPath, fileName, shareFileName };
   }
 
-  ipcMain.handle("open-deck-viewer", () => {
+  openCurrentDeckViewer = () => {
     const currentEventRecord = liveState.snapshot().eventRecord;
     const currentEventId = currentEventRecord?.eventId;
     if (!currentEventId) return { ok: false, reason: "No current event to show yet." };
@@ -1299,7 +1350,8 @@ app.whenReady().then(() => {
       store?.close();
       cardStore?.close();
     }
-  });
+  };
+  ipcMain.handle("open-deck-viewer", () => openCurrentDeckViewer!());
 
   /**
    * Milestone 19: "I want to be able to open even previous events and decks
@@ -1779,9 +1831,23 @@ app.whenReady().then(() => {
     }
   };
 
-  ipcMain.handle("open-draft-progress", () => {
+  openDraftProgressPage = () => {
     regenerateDraftProgressPage();
     shell.openPath(draftProgressPath);
+  };
+  ipcMain.handle("open-draft-progress", () => {
+    openDraftProgressPage!();
+    return { ok: true };
+  });
+
+  // The overlay's menu button (see openOverlayMenu) - hover makes the
+  // otherwise click-through window clickable, click opens the menu.
+  ipcMain.on("overlay-set-clickable", (_event, clickable: unknown) => {
+    if (!mainWindow || mainWindow.isDestroyed() || interactive) return; // unlocked = already clickable everywhere
+    mainWindow.setIgnoreMouseEvents(clickable !== true, { forward: true });
+  });
+  ipcMain.handle("open-overlay-menu", () => {
+    openOverlayMenu();
     return { ok: true };
   });
 

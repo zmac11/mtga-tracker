@@ -160,3 +160,14 @@ els.draftProgress.addEventListener("click", async () => {
     console.warn("Draft progress:", (result && result.reason) || "Could not open the draft-progress page.");
   }
 });
+
+// 2026-10-02: the menu button. The window is click-through, so main.ts only
+// makes it clickable while the cursor is over this button (mouse-move events
+// still reach the page in click-through mode - setIgnoreMouseEvents'
+// `forward` option - which is what lets mouseenter/mouseleave fire at all).
+const menuBtn = document.getElementById("menu-btn");
+menuBtn.addEventListener("mouseenter", () => window.overlay.setClickable(true));
+menuBtn.addEventListener("mouseleave", () => window.overlay.setClickable(false));
+menuBtn.addEventListener("click", () => {
+  window.overlay.openMenu();
+});

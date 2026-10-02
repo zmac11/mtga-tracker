@@ -94,7 +94,10 @@ Either box can be reset back to "Auto-detect" the same way.
 Launching the app (`npm run overlay`, or the packaged app) adds an icon to
 your menu bar/system tray - there's no dock icon or window menu, since the
 overlay window is the only visible thing this app shows on its own. Click
-the tray icon for:
+the tray icon for the menu below. The same menu is also available from the
+**☰ button in the overlay's top-right corner**, so you can open pages without
+leaving Arena - the overlay stays click-through everywhere except that button.
+The menu has:
 
 - **Start MTGA Tracker at Login** - launch it automatically.
 - **Unlock Overlay (drag to move)** (`Cmd/Ctrl+Shift+O`) - the overlay is

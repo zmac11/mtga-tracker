@@ -46,6 +46,35 @@ body {
   -webkit-app-region: drag;
 }
 
+/* The menu button (2026-10-02): sits in the transparent top strip, always
+   visible and always opaque enough to find over Arena. The window is
+   click-through everywhere else - overlay-renderer.js asks main.ts to make it
+   clickable only while the cursor is over this button. no-drag so a click here
+   never starts a window drag. */
+.menu-btn {
+  position: absolute;
+  top: 0;
+  right: 0.2rem;
+  z-index: 10;
+  height: 1.6rem;
+  min-width: 2.2rem;
+  padding: 0 0.6rem;
+  font-size: 1.2rem;
+  line-height: 1.6rem;
+  color: rgba(255, 255, 255, 0.85);
+  background: rgba(12, 12, 16, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 0.6rem;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.menu-btn:hover {
+  color: #fff;
+  background: rgba(60, 70, 120, 0.95);
+  border-color: rgba(120, 170, 255, 0.8);
+}
+
 .panel {
   margin-top: 1.4rem;
   height: calc(100% - 1.4rem);

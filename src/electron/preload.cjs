@@ -26,6 +26,10 @@ contextBridge.exposeInMainWorld("overlay", {
   },
   openDeckViewer: () => ipcRenderer.invoke("open-deck-viewer"),
   openDraftProgress: () => ipcRenderer.invoke("open-draft-progress"),
+  // The menu button: hovering it makes the click-through overlay clickable,
+  // clicking it pops up the tray's menu - see main.ts's openOverlayMenu.
+  setClickable: (clickable) => ipcRenderer.send("overlay-set-clickable", clickable),
+  openMenu: () => ipcRenderer.invoke("open-overlay-menu"),
 });
 
 // Milestone 9+: the Settings window (opened from the tray menu) reads and
