@@ -62,7 +62,16 @@ export interface CourseWindow {
  * mis-order on a fluke bad string either).
  */
 function tsMillis(ts: string): number {
-  return Date.parse(ts);
+  const direct = Date.parse(ts);
+  if (!Number.isNaN(direct)) return direct;
+  // Rows captured before logParser.ts's TIMESTAMP_RE was tightened
+  // (2026-10-02) carry trailing header text after the real timestamp -
+  // e.g. "9/30/2026 10:57:05 AM: Match" for every match/game-state row -
+  // which Date.parse rejects. Event-sourced storage never rewrites old
+  // rows, so recover the leading timestamp here instead of letting those
+  // rows fall back to (wrong) string ordering.
+  const leading = ts.match(/^\d{1,2}\/\d{1,2}\/\d{4} \d{1,2}:\d{2}:\d{2}(?: ?[AP]M)?/);
+  return leading ? Date.parse(leading[0]) : Number.NaN;
 }
 
 export function compareTs(a: string, b: string): number {

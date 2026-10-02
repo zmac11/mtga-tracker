@@ -43,6 +43,17 @@ function run() {
 
   assert.equal(blocks.length, 3, `expected 3 valid JSON blocks, got ${blocks.length}`);
 
+  // timestampGuess must be just the real timestamp, never trailing header
+  // text - a header like "...10:57:05 AM: Match to X" used to leak
+  // ": Match" in, making the ts unparseable by Date.parse (found 2026-10-02).
+  assert.equal(blocks[0].timestampGuess, "9/16/2026 3:14:07 PM");
+  assert.equal(blocks[1].timestampGuess, "9/16/2026 3:14:09 PM");
+  const noisy = new LogParser();
+  const noisyBlocks: RawBlock[] = [];
+  noisy.on("block", (b) => noisyBlocks.push(b));
+  noisy.feed('[UnityCrossThreadLogger]9/30/2026 10:57:05 AM: Match to ABC: GreToClientEvent\n{"x":1}\n\n');
+  assert.equal(noisyBlocks[0]?.timestampGuess, "9/30/2026 10:57:05 AM");
+
   assert.equal(blocks[0].direction, "request");
   assert.equal(blocks[0].methodGuess, "Bot.BotDraftPack");
   assert.equal((blocks[0].json as any).id, "abc-123");

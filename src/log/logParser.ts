@@ -29,7 +29,14 @@ export interface RawBlock {
   raw: string;
 }
 
-const TIMESTAMP_RE = /\d{1,2}\/\d{1,2}\/\d{4}[^\n]{0,20}(?:AM|PM)?/;
+// Just the date + time (+ AM/PM) Arena prints at the start of a header line.
+// This used to be `[^\n]{0,20}(?:AM|PM)?`, which also swallowed whatever
+// followed on that line (found 2026-10-02: every MatchFound/MatchCompleted/
+// GameStateSnapshot ts came out as e.g. "9/30/2026 10:57:05 AM: Match" -
+// unparseable by Date.parse, so ts comparisons for those rows silently fell
+// back to string ordering; see courseRuns.ts's tsMillis for the matching
+// tolerance for rows already stored that way).
+const TIMESTAMP_RE = /\d{1,2}\/\d{1,2}\/\d{4} \d{1,2}:\d{2}:\d{2}(?: ?[AP]M)?/;
 const METHOD_RE = /(?:==>|<==)\s*([A-Za-z0-9_.]+)/;
 
 type ScanState = "normal" | "inString" | "escapedInString";
