@@ -182,6 +182,18 @@ const SIZE_PRESETS: Record<string, { label: string; scale: number; width: number
 const DEFAULT_SIZE_PRESET = "medium";
 
 /**
+ * 2026-10-02: overlay look. "default" is the original dark panel; "blue" is
+ * the blue theme the menu button introduced, applied to the whole overlay.
+ * Purely cosmetic - renderer-side CSS keyed off body[data-theme] (see
+ * overlay.css); main.ts only persists the choice and pushes it.
+ */
+const OVERLAY_THEMES: Record<string, { label: string }> = {
+  default: { label: "Default (dark)" },
+  blue: { label: "Blue (matches the menu button)" },
+};
+const DEFAULT_OVERLAY_THEME = "default";
+
+/**
  * Milestone 23: how much bigger the overlay window gets while a draft is
  * actively in progress, so the expanded draft-board panel (every pack seen
  * so far, picks made, colors taken) has real room to show instead of being
@@ -221,6 +233,7 @@ const DEFAULT_CARD_SIZE_PRESET = "medium";
 
 interface OverlaySettings {
   sizePreset: string; // a key of SIZE_PRESETS
+  theme: string; // a key of OVERLAY_THEMES - 2026-10-02
   opacity: number; // MIN_OPACITY..MAX_OPACITY
   cardSizePreset: string; // a key of CARD_SIZE_PRESETS - milestone 13
   autoCheckForUpdates: boolean; // milestone 15 - defaults to true; see the Settings window's "Updates" section
@@ -249,6 +262,7 @@ function loadOverlaySettings(): OverlaySettings {
     const raw = readFileSync(overlaySettingsPath(), "utf8");
     const parsed = JSON.parse(raw);
     const sizePreset = typeof parsed.sizePreset === "string" && parsed.sizePreset in SIZE_PRESETS ? parsed.sizePreset : DEFAULT_SIZE_PRESET;
+    const theme = typeof parsed.theme === "string" && parsed.theme in OVERLAY_THEMES ? parsed.theme : DEFAULT_OVERLAY_THEME;
     const opacity =
       typeof parsed.opacity === "number" && parsed.opacity >= MIN_OPACITY && parsed.opacity <= MAX_OPACITY ? parsed.opacity : DEFAULT_OPACITY;
     const cardSizePreset =
@@ -263,11 +277,12 @@ function loadOverlaySettings(): OverlaySettings {
     // exactly "keep auto-detecting", not an error.
     const customLogPath = typeof parsed.customLogPath === "string" && parsed.customLogPath.length > 0 ? parsed.customLogPath : null;
     const customCardDbPath = typeof parsed.customCardDbPath === "string" && parsed.customCardDbPath.length > 0 ? parsed.customCardDbPath : null;
-    return { sizePreset, opacity, cardSizePreset, autoCheckForUpdates, customLogPath, customCardDbPath };
+    return { sizePreset, theme, opacity, cardSizePreset, autoCheckForUpdates, customLogPath, customCardDbPath };
   } catch {
     // No settings saved yet, or the file's unreadable/corrupt - fall back to the original look.
     return {
       sizePreset: DEFAULT_SIZE_PRESET,
+      theme: DEFAULT_OVERLAY_THEME,
       opacity: DEFAULT_OPACITY,
       cardSizePreset: DEFAULT_CARD_SIZE_PRESET,
       autoCheckForUpdates: true,
@@ -345,6 +360,7 @@ let refreshingCards = false;
 let cardRefreshStatus: CardRefreshStatus | null = null;
 let overlaySettings: OverlaySettings = {
   sizePreset: DEFAULT_SIZE_PRESET,
+  theme: DEFAULT_OVERLAY_THEME,
   opacity: DEFAULT_OPACITY,
   cardSizePreset: DEFAULT_CARD_SIZE_PRESET,
   autoCheckForUpdates: true,
@@ -666,7 +682,7 @@ function applyWindowBounds(): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
     const [x, y] = mainWindow.getPosition();
     mainWindow.setBounds({ x, y, width, height });
-    mainWindow.webContents.send("settings", { fontSizePx: BASE_FONT_PX * preset.scale, opacity: overlaySettings.opacity });
+    mainWindow.webContents.send("settings", { fontSizePx: BASE_FONT_PX * preset.scale, opacity: overlaySettings.opacity, theme: overlaySettings.theme });
   }
 }
 
@@ -1108,6 +1124,8 @@ app.whenReady().then(() => {
     const cardDbStatus = locateCardDatabase(overlaySettings.customCardDbPath ?? undefined);
     return {
       sizePreset: overlaySettings.sizePreset,
+      theme: overlaySettings.theme,
+      themes: Object.entries(OVERLAY_THEMES).map(([key, t]) => ({ key, label: t.label })),
       opacity: overlaySettings.opacity,
       presets: Object.entries(SIZE_PRESETS).map(([key, preset]) => ({ key, label: preset.label })),
       cardSizePreset: overlaySettings.cardSizePreset,
@@ -1234,6 +1252,14 @@ app.whenReady().then(() => {
     }
     applyOverlaySettings({ ...overlaySettings, sizePreset: presetKey });
     return { ok: true, sizePreset: overlaySettings.sizePreset, opacity: overlaySettings.opacity };
+  });
+
+  ipcMain.handle("set-overlay-theme", (_event, themeKey: unknown) => {
+    if (typeof themeKey !== "string" || !(themeKey in OVERLAY_THEMES)) {
+      return { ok: false, reason: "Unknown overlay theme." };
+    }
+    applyOverlaySettings({ ...overlaySettings, theme: themeKey });
+    return { ok: true, theme: overlaySettings.theme };
   });
 
   ipcMain.handle("set-opacity", (_event, opacity: unknown) => {
@@ -1910,7 +1936,7 @@ app.whenReady().then(() => {
     // values) and is the only push at all in the (overwhelmingly common)
     // no-resumed-draft case.
     const preset = SIZE_PRESETS[overlaySettings.sizePreset] ?? SIZE_PRESETS[DEFAULT_SIZE_PRESET];
-    mainWindow?.webContents.send("settings", { fontSizePx: BASE_FONT_PX * preset.scale, opacity: overlaySettings.opacity });
+    mainWindow?.webContents.send("settings", { fontSizePx: BASE_FONT_PX * preset.scale, opacity: overlaySettings.opacity, theme: overlaySettings.theme });
   });
 
   // Milestone 25: "when I start a new one, close out the previous one and

@@ -121,7 +121,11 @@ function render({ foundLog, watchingPath, snapshot, draftBoardHtml }) {
 // root font-size) plus the opacity value here, both on load and any time
 // they change. Applying both through inline styles (rather than, say,
 // reloading the page) means there's no flicker when adjusting the slider.
-function applySettings({ fontSizePx, opacity }) {
+function applySettings({ fontSizePx, opacity, theme }) {
+  // 2026-10-02: overlay.css restyles everything off body[data-theme].
+  if (typeof theme === "string") {
+    document.body.dataset.theme = theme;
+  }
   if (typeof fontSizePx === "number") {
     document.documentElement.style.fontSize = `${fontSizePx}px`;
   }

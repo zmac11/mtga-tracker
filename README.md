@@ -105,7 +105,7 @@ The menu has:
   back off.
 - **Hide Overlay** (`Cmd/Ctrl+Shift+H`) - hide/show the whole overlay
   window.
-- **Overlay Settings...** - overlay size, transparency, deck-viewer card
+- **Overlay Settings...** - overlay size, theme (default dark or blue), transparency, deck-viewer card
   thumbnail size, automatic update checks (see below), and, under
   "Locations," manual overrides for where the app looks for `Player.log`
   and Arena's card database if it can't find either automatically (see

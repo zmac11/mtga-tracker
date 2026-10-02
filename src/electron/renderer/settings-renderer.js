@@ -71,6 +71,16 @@ function renderSizeOptions(presets, currentPreset) {
   renderRadioOptions(sizeOptionsEl, presets, currentPreset, (key) => window.settingsApi.setSizePreset(key), "Could not change the overlay size.");
 }
 
+function renderThemeOptions(themes, currentTheme) {
+  renderRadioOptions(
+    document.getElementById("theme-options"),
+    themes,
+    currentTheme,
+    (key) => window.settingsApi.setOverlayTheme(key),
+    "Could not change the overlay theme.",
+  );
+}
+
 function renderCardSizeOptions(presets, currentPreset) {
   renderRadioOptions(
     cardSizeOptionsEl,
@@ -291,6 +301,7 @@ function renderPendingClosures(list) {
 async function init() {
   const settings = await window.settingsApi.getSettings();
   renderSizeOptions(settings.presets, settings.sizePreset);
+  renderThemeOptions(settings.themes, settings.theme);
   renderCardSizeOptions(settings.cardSizePresets, settings.cardSizePreset);
   setOpacitySlider(settings.opacity);
   autoUpdateCheckbox.checked = settings.autoCheckForUpdates !== false;

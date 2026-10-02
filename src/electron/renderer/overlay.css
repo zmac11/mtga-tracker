@@ -65,18 +65,52 @@ body {
   line-height: 2.4rem;
   text-align: center;
   color: #fff;
-  background: rgba(45, 60, 130, 0.95);
-  border: 1.5px solid rgba(150, 185, 255, 0.95);
+  /* Default theme: still the most noticeable thing on the overlay, but in the
+     overlay's own neutral palette - dark fill, bright white border and glow. */
+  background: rgba(24, 24, 32, 0.96);
+  border: 1.5px solid rgba(255, 255, 255, 0.9);
   border-radius: 0.7rem;
-  box-shadow: 0 0 0.8rem rgba(110, 150, 255, 0.55);
+  box-shadow: 0 0 0.8rem rgba(255, 255, 255, 0.4);
   cursor: pointer;
   -webkit-app-region: no-drag;
 }
 
 .menu-btn:hover {
+  background: rgba(70, 70, 86, 1);
+  border-color: #fff;
+  box-shadow: 0 0 1.1rem rgba(255, 255, 255, 0.7);
+}
+
+/* Blue theme (Overlay Settings > Theme): the button's blue look... */
+body[data-theme="blue"] .menu-btn {
+  background: rgba(45, 60, 130, 0.95);
+  border-color: rgba(150, 185, 255, 0.95);
+  box-shadow: 0 0 0.8rem rgba(110, 150, 255, 0.55);
+}
+
+body[data-theme="blue"] .menu-btn:hover {
   background: rgba(75, 100, 190, 1);
   border-color: #fff;
   box-shadow: 0 0 1.1rem rgba(150, 185, 255, 0.9);
+}
+
+/* ...carried over to the whole overlay: a blue-tinted panel with a glowing
+   blue border, and blue-tinted secondary text. */
+body[data-theme="blue"] .panel {
+  background: rgba(20, 30, 70, var(--panel-opacity, 0.72));
+  border: 1.5px solid rgba(150, 185, 255, 0.75);
+  box-shadow: 0 0 0.9rem rgba(110, 150, 255, 0.35);
+}
+
+body[data-theme="blue"].interactive .panel {
+  border-color: #fff;
+}
+
+body[data-theme="blue"] .player .name,
+body[data-theme="blue"] .status,
+body[data-theme="blue"] .turn,
+body[data-theme="blue"] .vs {
+  color: rgba(200, 215, 255, 0.75);
 }
 
 /* Keep the first row's text clear of the button in the panel's top-right corner. */

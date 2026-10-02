@@ -39,6 +39,8 @@ contextBridge.exposeInMainWorld("settingsApi", {
   getSettings: () => ipcRenderer.invoke("get-overlay-settings"),
   setSizePreset: (presetKey) => ipcRenderer.invoke("set-size-preset", presetKey),
   setOpacity: (opacity) => ipcRenderer.invoke("set-opacity", opacity),
+  // 2026-10-02: overlay look - "default" (dark) or "blue" (matches the overlay's menu button).
+  setOverlayTheme: (themeKey) => ipcRenderer.invoke("set-overlay-theme", themeKey),
   // Milestone 13: deck viewer "Visual" tab card-thumbnail size.
   setCardSizePreset: (presetKey) => ipcRenderer.invoke("set-card-size-preset", presetKey),
   // Milestone 15: the "Updates" section - toggling automatic checks, and an explicit "Check Now" button.
