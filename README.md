@@ -177,6 +177,7 @@ npm run build      # compiles TypeScript to dist/ and copies Electron assets
 npm run overlay    # build + launch the Electron app
 npm run report     # headless CLI: win rates, color combos, per-event history (--event=<id>)
 npm run backfill   # replay Player.log from the start into tracker.db
+npm run backfill-from-log   # recover matches missed while the tracker was off (Player.log + Player-prev.log); add -- --dry-run to preview
 npm run deck-viewer -- <eventId>      # regenerate one event's deck-viewer page without the app running
 npm run draft-progress                # regenerate the live draft-progress page without the app running
 npm run refresh-cards                 # the same card-database refresh as the tray button, from a terminal
