@@ -7,7 +7,6 @@
   </head>
   <body>
     <div id="drag-handle" class="drag-handle" title="Drag to move (Cmd/Ctrl+Shift+O to unlock)"></div>
-    <button id="menu-btn" class="menu-btn" type="button" title="Open menu (past events, stats, settings...)" aria-label="Open menu">&#9776;</button>
     <div id="panel" class="panel">
       <div id="status" class="status">Starting...</div>
 
@@ -47,7 +46,12 @@
         <span class="event-wl" id="event-wl"></span>
       </div>
     </div>
-    <!-- The menu opened by the button above: the tray's entries, drawn inside
+    <!-- DOM order matters here: Chromium builds the window's draggable region by
+         walking elements in order (drag = add, no-drag = subtract), so this
+         no-drag button has to come AFTER the .panel (a drag region) or the
+         panel re-adds the button's area as draggable and swallows its clicks. -->
+    <button id="menu-btn" class="menu-btn" type="button" title="Open menu (past events, stats, settings...)" aria-label="Open menu">&#9776;</button>
+    <!-- The menu opened by the button: the tray's entries, drawn inside
          the overlay (a native popup doesn't reliably show over fullscreen
          Arena). Filled by overlay-renderer.js from the entries main.ts pushes. -->
     <div id="menu-panel" class="menu-panel hidden"></div>
