@@ -528,3 +528,42 @@ body[data-theme="blue"] .deck-list {
   color: rgba(255, 255, 255, 0.6);
   font-size: 0.95em;
 }
+
+/* The opponent's cards seen this match (Bo3 memory) share the column with the
+   library list: it takes what it needs up to 40% of the height and scrolls
+   inside; on its own (no library known) it fills the column. */
+.opp-section {
+  flex: 0 1 auto;
+  max-height: 40%;
+  display: flex;
+  flex-direction: column;
+  margin-top: 0.6rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.opp-section .lib-head {
+  margin-right: 0;
+}
+
+.deck-list > .opp-section:first-child {
+  flex: 1;
+  max-height: none;
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.deck-list > .opp-section:first-child .lib-head {
+  margin-right: 3rem;
+}
+
+.opp-rows {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.opp-row {
+  grid-template-columns: 1fr auto;
+}

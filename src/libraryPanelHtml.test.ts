@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { formatPercent, libraryFragmentHtml, manaValueOf, type LibraryCardInfo } from "./libraryPanelHtml.js";
+import { formatPercent, libraryFragmentHtml, manaValueOf, opponentSectionHtml, type LibraryCardInfo } from "./libraryPanelHtml.js";
 import type { LibrarySnapshot } from "./domain/libraryTracker.js";
 
 function run() {
@@ -45,6 +45,34 @@ function run() {
 
   const warn = libraryFragmentHtml({ ...snap, consistent: false }, cards);
   assert.ok(warn.includes("lib-warn"));
+
+  // Opponent section: basics hidden, "seen/known" shown, earlier-games title.
+  const oppCards = new Map<number, LibraryCardInfo>([
+    [10, { name: "Mountain", manaCost: null, types: ["Land"] }],
+    [11, { name: "Fire <Drake>", manaCost: "{2}{R}", types: ["Creature"] }],
+    [12, { name: "Cave of Embers", manaCost: null, types: ["Land"] }],
+  ]);
+  const oppSnap = {
+    matchId: "m",
+    gameNumber: 2,
+    hasEarlierGames: true,
+    entries: [
+      { grpId: 11, copies: 2, seenThisGame: 0 },
+      { grpId: 10, copies: 5, seenThisGame: 3 },
+      { grpId: 12, copies: 1, seenThisGame: 1 },
+    ],
+  };
+  const oh = opponentSectionHtml(oppSnap, oppCards);
+  assert.ok(oh.includes("Opponent&#39;s cards (this match)") || oh.includes("Opponent's cards (this match)"));
+  assert.ok(oh.includes("Fire &lt;Drake&gt;") && oh.includes("0/2"));
+  assert.ok(!oh.includes("Mountain"), "basic lands are not listed");
+  assert.ok(oh.includes("Cave of Embers") && oh.includes("lib-gone"), "a fully-seen card is dimmed");
+  assert.equal(opponentSectionHtml({ ...oppSnap, entries: [{ grpId: 10, copies: 3, seenThisGame: 3 }] }, oppCards), "", "nothing but basics -> no section");
+  // Full fragment: own library + opponent, or the opponent alone when the library is unknown.
+  const both = libraryFragmentHtml(snap, cards, oppSnap);
+  assert.ok(both.indexOf("Library") < both.indexOf("opp-section"));
+  const alone = libraryFragmentHtml(null, oppCards, oppSnap);
+  assert.ok(alone.startsWith('<div class="opp-section">'));
 
   console.log("libraryPanelHtml tests passed");
 }

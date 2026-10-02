@@ -2195,13 +2195,14 @@ app.whenReady().then(() => {
     };
     const refreshLibraryPanel = () => {
       const snap = libraryTracker.snapshot();
-      const visible = snap !== null && !libraryGameOver;
+      const opp = libraryTracker.opponentSnapshot();
+      const visible = (snap !== null || opp !== null) && !libraryGameOver;
       let html: string | null = null;
-      if (visible && snap) {
-        resolveLibraryCards(snap.entries.map((e) => e.grpId));
-        html = libraryFragmentHtml(snap, libraryCardInfo);
+      if (visible) {
+        resolveLibraryCards([...(snap?.entries.map((e) => e.grpId) ?? []), ...(opp?.entries.map((e) => e.grpId) ?? [])]);
+        html = libraryFragmentHtml(snap, libraryCardInfo, opp) || null;
       }
-      setOverlayLibraryExpanded(visible);
+      setOverlayLibraryExpanded(html !== null);
       if (html === lastLibraryHtml) return;
       lastLibraryHtml = html;
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("library", { html });

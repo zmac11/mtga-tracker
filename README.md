@@ -134,6 +134,13 @@ whole library random again. It needs to have seen the game start - if the
 tracker is launched mid-game the panel stays hidden (or shows a `~` if some
 cards couldn't be matched) rather than guessing.
 
+Below your own list the panel also shows the **opponent's cards** seen this
+match, with how many copies you've seen versus how many he's shown at once
+(`0/2` = two copies known, none out yet this game). In a best-of-three this
+carries over between games, so in game 2 you can see what he played in game
+1 and could play again. Basic lands are left out. This memory is live only:
+if you restart the tracker between games it starts the match over.
+
 **On Windows**, run Arena in **Borderless Windowed** mode (Arena's own
 Options > Graphics setting), not true exclusive Fullscreen - an
 always-on-top window like this overlay generally can't draw above an

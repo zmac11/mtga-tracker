@@ -150,6 +150,62 @@ function run() {
   t4.feed(gs("Full", { zones: [zone(LIB, "ZoneType_Library", MY, libIds)] }));
   assert.equal(t4.snapshot()!.seat, MY);
 
+  // Bo3: the opponent's cards are remembered across games of the same match.
+  const OPP = 1;
+  const BF2 = 28, OPP_GY = 33;
+  const info = (gameNumber: number) => ({ gameInfo: { matchID: "match-1", gameNumber } });
+  const t5 = new LibraryTracker();
+  t5.feed(connect(DECK));
+  t5.feed(gs("Full", { ...info(1), zones: [zone(LIB, "ZoneType_Library", MY, libIds), zone(BF2, "ZoneType_Battlefield", null, []), zone(OPP_GY, "ZoneType_Graveyard", OPP, [])] }));
+  assert.equal(t5.opponentSnapshot(), null, "nothing seen yet");
+  // Game 1: two copies of 500 on the battlefield, one 600 in the graveyard, plus a token and an ability that must be ignored.
+  t5.feed(
+    gs("Diff", {
+      zones: [zone(BF2, "ZoneType_Battlefield", null, [501, 502, 503]), zone(OPP_GY, "ZoneType_Graveyard", OPP, [601])],
+      gameObjects: [card(501, 500, BF2, OPP), card(502, 500, BF2, OPP), card(503, 700, BF2, OPP, "GameObjectType_Token"), card(601, 600, OPP_GY, OPP)],
+    }),
+  );
+  let o = t5.opponentSnapshot()!;
+  assert.equal(o.matchId, "match-1");
+  assert.equal(o.hasEarlierGames, false);
+  assert.deepEqual(
+    o.entries.map((e) => [e.grpId, e.copies, e.seenThisGame]),
+    [[500, 2, 2], [600, 1, 1]],
+    "tokens ignored; copies counted by simultaneous visibility",
+  );
+  // A reconnect mid-game (Full state again, same game) must not double the counts.
+  t5.feed(connect(DECK));
+  t5.feed(
+    gs("Full", {
+      ...info(1),
+      zones: [zone(LIB, "ZoneType_Library", MY, libIds), zone(BF2, "ZoneType_Battlefield", null, [511, 512]), zone(OPP_GY, "ZoneType_Graveyard", OPP, [])],
+      gameObjects: [card(511, 500, BF2, OPP), card(512, 500, BF2, OPP)],
+    }),
+  );
+  o = t5.opponentSnapshot()!;
+  assert.equal(o.entries.find((e) => e.grpId === 500)!.copies, 2);
+  // Game 2 of the same match: only one 500 so far; the earlier games' knowledge stays.
+  t5.feed(connect(DECK));
+  t5.feed(
+    gs("Full", {
+      ...info(2),
+      zones: [zone(LIB, "ZoneType_Library", MY, libIds), zone(BF2, "ZoneType_Battlefield", null, [521]), zone(OPP_GY, "ZoneType_Graveyard", OPP, [])],
+      gameObjects: [card(521, 500, BF2, OPP)],
+    }),
+  );
+  o = t5.opponentSnapshot()!;
+  assert.equal(o.gameNumber, 2);
+  assert.equal(o.hasEarlierGames, true);
+  const e500 = o.entries.find((e) => e.grpId === 500)!;
+  assert.deepEqual([e500.copies, e500.seenThisGame], [2, 1]);
+  const e600 = o.entries.find((e) => e.grpId === 600)!;
+  assert.deepEqual([e600.copies, e600.seenThisGame], [1, 0], "seen before, not yet this game");
+  assert.ok(o.entries[0].copies - o.entries[0].seenThisGame >= o.entries[o.entries.length - 1].copies - o.entries[o.entries.length - 1].seenThisGame);
+  // A different match starts fresh.
+  t5.feed(connect(DECK));
+  t5.feed(gs("Full", { gameInfo: { matchID: "match-2", gameNumber: 1 }, zones: [zone(LIB, "ZoneType_Library", MY, libIds), zone(BF2, "ZoneType_Battlefield", null, [])] }));
+  assert.equal(t5.opponentSnapshot(), null);
+
   console.log("libraryTracker tests passed");
 }
 

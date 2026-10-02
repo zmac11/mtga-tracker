@@ -1,4 +1,4 @@
-import type { LibrarySnapshot } from "./domain/libraryTracker.js";
+import type { LibrarySnapshot, OpponentCardsSnapshot } from "./domain/libraryTracker.js";
 import { escapeHtml } from "./htmlCardHelpers.js";
 
 /**
@@ -44,7 +44,40 @@ function sortKey(info: LibraryCardInfo | undefined): [number, number] {
   return [0, manaValueOf(info.manaCost)];
 }
 
-export function libraryFragmentHtml(snapshot: LibrarySnapshot, cards: Map<number, LibraryCardInfo>): string {
+const BASIC_LAND_NAMES = new Set(["Plains", "Island", "Swamp", "Mountain", "Forest", "Wastes", "Snow-Covered Plains", "Snow-Covered Island", "Snow-Covered Swamp", "Snow-Covered Mountain", "Snow-Covered Forest"]);
+
+/**
+ * The opponent's cards seen so far this match (earlier Bo3 games included),
+ * as "seen this game / known copies" so what they could still play is
+ * obvious. Basic lands are left out - their count says nothing - but the
+ * non-basic ones stay (they hint at colors).
+ */
+export function opponentSectionHtml(opponent: OpponentCardsSnapshot, cards: Map<number, LibraryCardInfo>): string {
+  const name = (grpId: number) => cards.get(grpId)?.name ?? `Card ${grpId}`;
+  const entries = opponent.entries.filter((e) => !BASIC_LAND_NAMES.has(cards.get(e.grpId)?.name ?? ""));
+  if (entries.length === 0) return "";
+  const title = opponent.hasEarlierGames ? "Opponent's cards (this match)" : "Opponent's cards";
+  const rows = entries
+    .map((e) => {
+      const out = e.seenThisGame >= e.copies;
+      return (
+        `<div class="lib-row opp-row${out ? " lib-gone" : ""}">` +
+        `<span class="lib-name" title="${escapeHtml(name(e.grpId))}">${escapeHtml(name(e.grpId))}</span>` +
+        `<span class="lib-n" title="seen this game / copies known">${e.seenThisGame}/${e.copies}</span>` +
+        `</div>`
+      );
+    })
+    .join("");
+  return `<div class="opp-section"><div class="lib-head"><span class="lib-title">${title}</span><span class="lib-count">${entries.length}</span></div><div class="opp-rows">${rows}</div></div>`;
+}
+
+export function libraryFragmentHtml(snapshot: LibrarySnapshot | null, cards: Map<number, LibraryCardInfo>, opponent: OpponentCardsSnapshot | null = null): string {
+  const opp = opponent ? opponentSectionHtml(opponent, cards) : "";
+  if (!snapshot) return opp;
+  return ownLibraryHtml(snapshot, cards) + opp;
+}
+
+function ownLibraryHtml(snapshot: LibrarySnapshot, cards: Map<number, LibraryCardInfo>): string {
   const name = (grpId: number) => cards.get(grpId)?.name ?? `Card ${grpId}`;
   const rows = [...snapshot.entries].sort((a, b) => {
     const [ga, ma] = sortKey(cards.get(a.grpId));

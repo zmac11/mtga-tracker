@@ -54,6 +54,12 @@ const OUT_OF_LIBRARY_ZONES = new Set([
 /** This many own cards outside the decklist => the decklist is stale (see snapshot()). */
 const DECK_MISMATCH_FOREIGN_CARDS = 3;
 
+/** Zones where the opponent's cards are public to us (their hand and library never are). */
+const OPPONENT_VISIBLE_ZONES = new Set(["ZoneType_Battlefield", "ZoneType_Graveyard", "ZoneType_Exile", "ZoneType_Stack"]);
+
+/** Remember this many matches' worth of opponent cards (a long session is dozens of matches; nothing needs the old ones). */
+const MAX_REMEMBERED_MATCHES = 12;
+
 interface ZoneInfo {
   type: string;
   ownerSeat: number | null;
@@ -93,6 +99,24 @@ export interface LibrarySnapshot {
   consistent: boolean;
 }
 
+export interface OpponentCardEntry {
+  grpId: number;
+  /** Most copies of this card the opponent is known to run: the best showing in any single game of this match so far. */
+  copies: number;
+  /** Copies already shown in the CURRENT game. */
+  seenThisGame: number;
+}
+
+export interface OpponentCardsSnapshot {
+  matchId: string | null;
+  /** The game being played (1-based), when Arena has said. */
+  gameNumber: number | null;
+  /** Every distinct card the opponent has shown this match, most-still-to-come first. */
+  entries: OpponentCardEntry[];
+  /** True when at least one EARLIER game of this match contributed (i.e. this is Bo3 game 2/3 and there is real history). */
+  hasEarlierGames: boolean;
+}
+
 export class LibraryTracker {
   private mySeat: number | null = null;
   private deck = new Map<number, number>(); // grpId -> copies in this game's deck
@@ -109,6 +133,10 @@ export class LibraryTracker {
    * mapping is a fact about the cards, so it is kept across games.
    */
   private faceToDeckGrpId = new Map<number, number>();
+  /** matchId -> gameNumber -> grpId -> most copies of the opponent's card visible at once in that game. Survives reconnects/resets: it is match memory, not game state. */
+  private opponentByMatch = new Map<string, Map<number, Map<number, number>>>();
+  private currentMatchId: string | null = null;
+  private currentGameNumber: number | null = null;
   /** How many game connections (connect messages) have been seen - a change means a new game began. */
   connectCount = 0;
   /** True once a game's state has arrived after the last reset - gates the snapshot. */
@@ -211,6 +239,73 @@ export class LibraryTracker {
       for (const id of gsm.diffDeletedInstanceIds) this.objects.delete(Number(id));
     }
     if (this.zones.size > 0) this.active = true;
+
+    const info = isObj(gsm.gameInfo) ? gsm.gameInfo : null;
+    if (info) {
+      if (typeof info.matchID === "string") this.currentMatchId = info.matchID;
+      if (typeof info.gameNumber === "number") this.currentGameNumber = info.gameNumber;
+    }
+    this.recordOpponentCards();
+  }
+
+  /**
+   * The opponent's hand and library are hidden, so what we learn about their
+   * deck is the cards that reach a public zone. A physical card sits in one
+   * zone at a time, so the number of distinct opponent cards of a grpId that
+   * are visible AT ONCE is a lower bound on the copies they run; the best such
+   * count over a game is remembered per game. (Instance ids change on every
+   * zone move, so counting ids over time would count one card many times.)
+   */
+  private recordOpponentCards(): void {
+    if (this.mySeat === null) return;
+    const now = new Map<number, number>();
+    for (const z of this.zones.values()) {
+      if (!OPPONENT_VISIBLE_ZONES.has(z.type)) continue;
+      for (const id of z.ids) {
+        const o = this.objects.get(id);
+        if (!o || o.ownerSeat === null || o.ownerSeat === this.mySeat || o.type !== "GameObjectType_Card" || !(o.grpId > 0)) continue;
+        const grpId = this.toDeckGrpId(o.grpId);
+        now.set(grpId, (now.get(grpId) ?? 0) + 1);
+      }
+    }
+    if (now.size === 0) return;
+    const matchKey = this.currentMatchId ?? "unknown";
+    let games = this.opponentByMatch.get(matchKey);
+    if (!games) {
+      games = new Map();
+      this.opponentByMatch.set(matchKey, games);
+      while (this.opponentByMatch.size > MAX_REMEMBERED_MATCHES) {
+        const oldest = this.opponentByMatch.keys().next().value;
+        if (oldest === undefined) break;
+        this.opponentByMatch.delete(oldest);
+      }
+    }
+    const gameKey = this.currentGameNumber ?? 1;
+    let best = games.get(gameKey);
+    if (!best) {
+      best = new Map();
+      games.set(gameKey, best);
+    }
+    for (const [grpId, n] of now) if (n > (best.get(grpId) ?? 0)) best.set(grpId, n);
+  }
+
+  /** What the opponent has shown this match, for the current game's "what could they still play" list; null before any is known. */
+  opponentSnapshot(): OpponentCardsSnapshot | null {
+    if (!this.active) return null;
+    const games = this.opponentByMatch.get(this.currentMatchId ?? "unknown");
+    if (!games || games.size === 0) return null;
+    const current = this.currentGameNumber ?? 1;
+    const copies = new Map<number, number>();
+    let hasEarlierGames = false;
+    for (const [gameNumber, cards] of games) {
+      if (gameNumber < current) hasEarlierGames = true;
+      for (const [grpId, n] of cards) if (n > (copies.get(grpId) ?? 0)) copies.set(grpId, n);
+    }
+    const thisGame = games.get(current);
+    const entries: OpponentCardEntry[] = [...copies].map(([grpId, n]) => ({ grpId, copies: n, seenThisGame: thisGame?.get(grpId) ?? 0 }));
+    // Cards that could still show up first (most unseen copies), then the ones already out.
+    entries.sort((a, b) => b.copies - b.seenThisGame - (a.copies - a.seenThisGame) || b.copies - a.copies || a.grpId - b.grpId);
+    return { matchId: this.currentMatchId, gameNumber: this.currentGameNumber, entries, hasEarlierGames };
   }
 
   private toDeckGrpId(grpId: number): number {
