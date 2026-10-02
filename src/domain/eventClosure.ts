@@ -2,6 +2,7 @@ import type { EventHistorySource, EventRunRef } from "./eventHistory.js";
 import { listEventRuns, courseWindowsForEvent } from "./eventHistory.js";
 import { assignCourseId, compareTs } from "./courseRuns.js";
 import { parseEventIdentity, type EventFormat, type EventIdentity } from "./eventIdentity.js";
+import { computeRunStatuses, runStatusKey } from "./runStatus.js";
 
 /**
  * Milestone 25: "the tracker missed an event's end - when I start a new
@@ -37,10 +38,6 @@ export interface PendingClosure {
   startedAt: string;
 }
 
-function runKey(eventId: string, courseId: string | null): string {
-  return `${eventId}|${courseId ?? ""}`;
-}
-
 interface RunSignals {
   isFinished: boolean;
   lastKnownWins: number;
@@ -52,7 +49,7 @@ function minTs(values: string[]): string | null {
   return values.length === 0 ? null : values.reduce((min, ts) => (compareTs(ts, min) < 0 ? ts : min));
 }
 
-function resolveRunSignals(ref: EventRunRef, source: EventHistorySource, manualKeys: ReadonlySet<string>): RunSignals {
+function resolveRunSignals(ref: EventRunRef, source: EventHistorySource, isFinished: boolean): RunSignals {
   const { eventId, courseId } = ref;
   const windows = courseWindowsForEvent(eventId, source);
   const disambiguating = windows.length > 1;
@@ -67,8 +64,6 @@ function resolveRunSignals(ref: EventRunRef, source: EventHistorySource, manualK
   const completionsForRun = source.completions.filter((c) => c.eventName === eventId && matchesCourseId(c));
 
   const latestStanding = standingsForRun.length > 0 ? [...standingsForRun].sort((a, b) => compareTs(a.ts, b.ts)).at(-1)! : null;
-
-  const isFinished = rewardsForRun.length > 0 || manualKeys.has(runKey(eventId, courseId)) || latestStanding?.currentModule === "Complete";
 
   const startedAt = minTs([
     ...joinsForRun.map((j) => j.ts),
@@ -110,9 +105,15 @@ function listEventRunsIncludingBareJoins(source: EventHistorySource): EventRunRe
 
 export function findPendingClosures(source: EventHistorySource): PendingClosure[] {
   const refs = listEventRunsIncludingBareJoins(source);
-  const manualKeys = new Set(source.manualResults.map((m) => runKey(m.eventId, m.courseId)));
+  // "Finished" is decided by runStatus.ts (prize claimed, Arena's "Complete"
+  // or "ClaimPrize" standing, a manual score, or the run having reached its
+  // event type's win/loss cap) - the single definition shared with the Past
+  // Events page, so a run that visibly ended is never flagged as unfinished.
+  const statuses = computeRunStatuses(source, refs);
 
-  const withSignals = refs.map((ref) => ({ ref, signals: resolveRunSignals(ref, source, manualKeys) })).filter((r) => r.signals.startedAt !== null);
+  const withSignals = refs
+    .map((ref) => ({ ref, signals: resolveRunSignals(ref, source, statuses.get(runStatusKey(ref.eventId, ref.courseId))?.finished ?? false) }))
+    .filter((r) => r.signals.startedAt !== null);
 
   const byFormat = new Map<EventFormat, typeof withSignals>();
   for (const row of withSignals) {

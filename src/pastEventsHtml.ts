@@ -36,6 +36,10 @@ export interface PastEventRow {
   courseId: string | null;
   /** Human-readable "run started <when>" label, set exactly when courseId is - see deckViewerLoader.ts's identical label for the deck-viewer page itself. */
   runLabel: string | null;
+  /** Whether the run is over - decided by domain/runStatus.ts (prize claimed, Arena's own finish signal, manual score, or a reached win/loss cap). */
+  finished: boolean;
+  /** Short wording for why/how it ended ("Completed 4-3 - eliminated at 3 losses"), or "In progress". */
+  statusLabel: string;
 }
 
 function formatDateStamp(dateStamp: string | null): string {
@@ -51,7 +55,7 @@ function rowHtml(row: PastEventRow): string {
   return `
     <li class="run-row">
       <a href="./${escapeHtml(row.fileName)}">
-        <span class="event-name">${escapeHtml(row.identity.definitionLabel)}${runBadge}</span>
+        <span class="event-name">${escapeHtml(row.identity.definitionLabel)}${runBadge} <span class="status ${row.finished ? "status-done" : "status-live"}">${escapeHtml(row.statusLabel)}</span></span>
         <span class="muted">${escapeHtml(row.format)}${date ? ` &middot; ${escapeHtml(date)}` : ""}</span>
       </a>
       <div class="sub">
@@ -73,9 +77,14 @@ export function generatePastEventsHtml(rows: PastEventRow[]): string {
     return (a.runLabel ?? "").localeCompare(b.runLabel ?? "");
   });
 
+  const inProgress = sorted.filter((r) => !r.finished);
+  const completed = sorted.filter((r) => r.finished);
+  const section = (title: string, list: PastEventRow[]) =>
+    list.length > 0 ? `<h2>${escapeHtml(title)} <span class="muted">(${list.length})</span></h2><ul class="run-list">${list.map(rowHtml).join("")}</ul>` : "";
+
   const body =
     sorted.length > 0
-      ? `<ul class="run-list">${sorted.map(rowHtml).join("")}</ul>`
+      ? `${section("In progress", inProgress)}${section("Completed", completed)}`
       : `<p class="muted">No events captured yet - play a match, draft, or sealed run with the tracker running and it'll show up here.</p>`;
 
   return `<!DOCTYPE html>
@@ -96,12 +105,16 @@ ${FAVICON_LINK_TAG}
   li.run-row a:hover .event-name { text-decoration: underline; }
   .event-name { font-weight: 600; }
   .badge { font-weight: 400; font-size: 0.75rem; color: #9fa6ff; background: #262a4a; border-radius: 4px; padding: 1px 6px; margin-left: 6px; }
+  h2 { font-size: 1.05rem; margin: 22px 0 8px; }
+  .status { font-weight: 400; font-size: 0.75rem; border-radius: 4px; padding: 1px 6px; margin-left: 6px; }
+  .status-done { color: #8fd9a8; background: #1e3a2a; }
+  .status-live { color: #f0c674; background: #3d3320; }
   .sub { display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px; font-size: 0.85rem; color: #cfd2dc; gap: 12px; }
 </style>
 </head>
 <body>
   <h1>Past Events</h1>
-  <p class="hint muted">Every event run captured so far. Click one to open its deck.</p>
+  <p class="hint muted">Every event run captured so far, split into what's still being played and what's finished. Click one to open its deck.</p>
   ${body}
 </body>
 </html>

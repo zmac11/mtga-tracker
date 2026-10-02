@@ -30,6 +30,7 @@ import { parseEventIdentity, resolveEventFormat } from "../domain/eventIdentity.
 import { buildCardSituationalWinRateRows, type GameResultContext } from "../domain/cardSituationalWinRate.js";
 import { generateCardSituationalWinRateHtml, type CardSituationalWinRateHtmlRow } from "../cardSituationalWinRateHtml.js";
 import { compareTs } from "../domain/courseRuns.js";
+import { computeRunStatuses, runStatusKey, describeRunStatus } from "../domain/runStatus.js";
 import { buildOpponentMatchRows } from "../domain/opponentStats.js";
 import { generateOpponentHtml } from "../opponentHtml.js";
 import { buildEventRewardRows, summarizeOverallRewards } from "../domain/rewardHistory.js";
@@ -1326,13 +1327,17 @@ app.whenReady().then(() => {
       cardStore = new CardStore(dbPath);
       const source = loadEventHistorySource(store);
       const knownRuns = listEventRuns(source);
+      const runStatuses = computeRunStatuses(source, knownRuns);
 
       const rows: PastEventRow[] = [];
       for (const run of knownRuns) {
         const written = writeDeckViewerPage(run.eventId, store, cardStore, run.courseId);
         if (!written.ok) continue; // shouldn't happen for a listed run, but never let one bad run break the whole index
         const history = buildEventRunHistory(run.eventId, source, run.courseId);
+        const status = runStatuses.get(runStatusKey(run.eventId, run.courseId));
         rows.push({
+          finished: status?.finished ?? false,
+          statusLabel: status ? describeRunStatus(status) : "In progress",
           eventId: run.eventId,
           identity: run.identity,
           format: history.format,
@@ -1688,7 +1693,7 @@ app.whenReady().then(() => {
         if (!deckList || deckList.length === 0) continue; // no deck ever captured for this run - nothing to attribute these games to
         let deck = deckList[0];
         for (const d of deckList) {
-          if (d.ts <= found.ts) deck = d;
+          if (compareTs(d.ts, found.ts) <= 0) deck = d;
           else break;
         }
 
