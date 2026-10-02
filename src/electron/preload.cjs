@@ -26,10 +26,19 @@ contextBridge.exposeInMainWorld("overlay", {
   },
   openDeckViewer: () => ipcRenderer.invoke("open-deck-viewer"),
   openDraftProgress: () => ipcRenderer.invoke("open-draft-progress"),
-  // The menu button: hovering it makes the click-through overlay clickable,
-  // clicking it pops up the tray's menu - see main.ts's openOverlayMenu.
-  setClickable: (clickable) => ipcRenderer.send("overlay-set-clickable", clickable),
+  // Clickable spots (menu button, current-event / draft rows) as
+  // window-relative rects: main polls the cursor against them and makes the
+  // click-through overlay clickable only over those - main.ts's
+  // updateOverlayHotspotState.
+  setHotspots: (rects) => ipcRenderer.send("overlay-set-hotspots", rects),
+  // The in-overlay menu (main.ts's openOverlayMenu): the button toggles it,
+  // main pushes its entries, and an entry click is reported back by id.
   openMenu: () => ipcRenderer.invoke("open-overlay-menu"),
+  closeMenu: () => ipcRenderer.invoke("close-overlay-menu"),
+  menuAction: (id) => ipcRenderer.invoke("overlay-menu-action", id),
+  onMenu: (callback) => {
+    ipcRenderer.on("overlay-menu", (_event, payload) => callback(payload));
+  },
 });
 
 // Milestone 9+: the Settings window (opened from the tray menu) reads and

@@ -27,7 +27,7 @@
         <div class="outcome hidden" id="outcome"></div>
       </div>
 
-      <div id="draft-progress" class="draft-progress hidden" title="Click to view live draft progress (unlock the overlay first - Cmd/Ctrl+Shift+O)">
+      <div id="draft-progress" class="draft-progress hidden" title="Click to view live draft progress">
         <span class="draft-pack-pick" id="draft-pack-pick"></span>
         <span class="draft-picked" id="draft-picked"></span>
       </div>
@@ -42,11 +42,15 @@
            innerHTML is safe here. -->
       <div id="draft-board" class="draft-board hidden"></div>
 
-      <div id="event-record" class="event-record hidden" title="Click to view this event's deck (unlock the overlay first - Cmd/Ctrl+Shift+O)">
+      <div id="event-record" class="event-record hidden" title="Click to view this event's deck">
         <span class="event-name" id="event-name"></span>
         <span class="event-wl" id="event-wl"></span>
       </div>
     </div>
+    <!-- The menu opened by the button above: the tray's entries, drawn inside
+         the overlay (a native popup doesn't reliably show over fullscreen
+         Arena). Filled by overlay-renderer.js from the entries main.ts pushes. -->
+    <div id="menu-panel" class="menu-panel hidden"></div>
     <script src="overlay-renderer.js"></script>
   </body>
 </html>

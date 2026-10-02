@@ -96,7 +96,11 @@ your menu bar/system tray - there's no dock icon or window menu, since the
 overlay window is the only visible thing this app shows on its own. Click
 the tray icon for the menu below. The same menu is also available from the
 **☰ button in the overlay's top-right corner**, so you can open pages without
-leaving Arena - the overlay stays click-through everywhere except that button.
+leaving Arena. The menu opens inside the overlay itself (so it shows over a
+fullscreen game) and closes when you pick an entry, press Esc, or move the
+mouse away. The overlay stays click-through everywhere except the ☰ button and
+the current-event / draft rows - those are clickable even when the overlay is
+locked.
 The menu has:
 
 - **Start MTGA Tracker at Login** - launch it automatically.

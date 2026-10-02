@@ -165,13 +165,95 @@ els.draftProgress.addEventListener("click", async () => {
   }
 });
 
-// 2026-10-02: the menu button. The window is click-through, so main.ts only
-// makes it clickable while the cursor is over this button (mouse-move events
-// still reach the page in click-through mode - setIgnoreMouseEvents'
-// `forward` option - which is what lets mouseenter/mouseleave fire at all).
+// 2026-10-02: the menu button, the in-overlay menu it opens, and the
+// clickable spots in general. The window is click-through, so main.ts polls
+// the real cursor position against the rects reported here and makes the
+// window clickable only while the cursor is over one of them (hover events
+// inside this page can't be relied on - see main.ts's
+// updateOverlayHotspotState). That works in locked mode too, not just when the
+// overlay is unlocked.
 const menuBtn = document.getElementById("menu-btn");
-menuBtn.addEventListener("mouseenter", () => window.overlay.setClickable(true));
-menuBtn.addEventListener("mouseleave", () => window.overlay.setClickable(false));
+const menuPanel = document.getElementById("menu-panel");
+
 menuBtn.addEventListener("click", () => {
   window.overlay.openMenu();
 });
+
+// The menu is drawn here, inside the overlay (a native popup menu doesn't
+// reliably show above fullscreen Arena). main.ts pushes the entries - the same
+// ones the tray has - and grows the window to fit; a click is reported back by
+// entry id, and main runs it and closes the menu.
+function renderMenu({ open, entries }) {
+  document.body.classList.toggle("menu-open", open);
+  menuPanel.innerHTML = "";
+  if (!open) {
+    menuPanel.classList.add("hidden");
+    queueHotspotReport();
+    return;
+  }
+  for (const entry of entries) {
+    if (entry.kind === "separator") {
+      const sep = document.createElement("div");
+      sep.className = "menu-sep";
+      menuPanel.appendChild(sep);
+      continue;
+    }
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = entry.enabled ? "menu-item" : "menu-item disabled";
+    const check = document.createElement("span");
+    check.className = "check";
+    check.textContent = entry.kind === "checkbox" && entry.checked ? "\u2713" : "";
+    const label = document.createElement("span");
+    label.className = "label";
+    label.textContent = entry.label;
+    item.appendChild(check);
+    item.appendChild(label);
+    if (entry.hint) {
+      const hint = document.createElement("span");
+      hint.className = "hint";
+      hint.textContent = entry.hint;
+      item.appendChild(hint);
+    }
+    if (entry.enabled) {
+      item.addEventListener("click", () => window.overlay.menuAction(entry.id));
+    }
+    menuPanel.appendChild(item);
+  }
+  menuPanel.classList.remove("hidden");
+  menuPanel.scrollTop = 0;
+  queueHotspotReport();
+}
+window.overlay.onMenu(renderMenu);
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") window.overlay.closeMenu();
+});
+
+function reportHotspots() {
+  const rects = [];
+  for (const el of [menuBtn, els.eventRecord, els.draftProgress]) {
+    if (el.classList.contains("hidden")) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) continue;
+    rects.push({ x: r.left - 2, y: r.top - 2, width: r.width + 4, height: r.height + 4 });
+  }
+  window.overlay.setHotspots(rects);
+}
+
+let hotspotReportQueued = false;
+function queueHotspotReport() {
+  if (hotspotReportQueued) return;
+  hotspotReportQueued = true;
+  requestAnimationFrame(() => {
+    hotspotReportQueued = false;
+    reportHotspots();
+  });
+}
+
+// Layout moves whenever state renders (rows appear/disappear), the size
+// preset changes the root font-size, or the window resizes for a draft/menu.
+new ResizeObserver(queueHotspotReport).observe(document.body);
+window.addEventListener("resize", queueHotspotReport);
+window.overlay.onState(queueHotspotReport);
+window.overlay.onSettings(queueHotspotReport);
+queueHotspotReport();

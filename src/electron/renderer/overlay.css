@@ -352,3 +352,78 @@ body.interactive .draft-progress:hover {
 .db-card .dot-R { background: #e05a4f; }
 .db-card .dot-G { background: #4fae6a; }
 .db-card .dot-C { background: #55586b; }
+
+/* The in-overlay menu (the menu button's dropdown). Covers the panel below the
+   top strip; the window itself grows while it's open (main.ts). Deliberately
+   more opaque than the panel so entries stay readable over a busy game. */
+.menu-panel {
+  position: absolute;
+  top: 1.4rem;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
+  overflow-y: auto;
+  padding: 0.5rem 0.4rem 0.5rem;
+  background: rgba(14, 14, 20, 0.97);
+  border: 1.5px solid rgba(255, 255, 255, 0.6);
+  border-radius: 1rem;
+  -webkit-app-region: no-drag;
+}
+
+body[data-theme="blue"] .menu-panel {
+  background: rgba(18, 26, 62, 0.97);
+  border-color: rgba(150, 185, 255, 0.85);
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.55rem 3.2rem 0.55rem 0.8rem; /* right padding keeps text clear of the menu button */
+  font: inherit;
+  font-size: 1.15rem;
+  text-align: left;
+  color: #fff;
+  background: transparent;
+  border: 0;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.menu-item:hover:not(.disabled) {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+body[data-theme="blue"] .menu-item:hover:not(.disabled) {
+  background: rgba(110, 150, 255, 0.3);
+}
+
+.menu-item.disabled {
+  color: rgba(255, 255, 255, 0.5);
+  cursor: default;
+}
+
+.menu-item .check {
+  width: 1.2rem;
+  flex: none;
+  text-align: center;
+}
+
+.menu-item .label {
+  flex: 1;
+}
+
+.menu-item .hint {
+  flex: none;
+  font-size: 0.95rem;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.menu-sep {
+  height: 1px;
+  margin: 0.4rem 0.6rem;
+  background: rgba(255, 255, 255, 0.2);
+}

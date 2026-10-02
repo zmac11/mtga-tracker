@@ -634,6 +634,7 @@ function createWindow(settings: OverlaySettings): BrowserWindow {
   win.setIgnoreMouseEvents(true, { forward: true });
 
   win.on("moved", () => {
+    if (suppressPositionSave) return; // programmatic move (the menu opening near a screen edge) - not where the user put it
     const [wx, wy] = win.getPosition();
     savePosition(wx, wy);
   });
@@ -677,11 +678,31 @@ let overlayDraftExpanded = false;
  */
 function applyWindowBounds(): void {
   const preset = SIZE_PRESETS[overlaySettings.sizePreset] ?? SIZE_PRESETS[DEFAULT_SIZE_PRESET];
-  const width = preset.width + (overlayDraftExpanded ? Math.round(DRAFT_BOARD_EXTRA_WIDTH * preset.scale) : 0);
-  const height = preset.height + (overlayDraftExpanded ? Math.round(DRAFT_BOARD_EXTRA_HEIGHT * preset.scale) : 0);
+  let width = preset.width + (overlayDraftExpanded ? Math.round(DRAFT_BOARD_EXTRA_WIDTH * preset.scale) : 0);
+  let height = preset.height + (overlayDraftExpanded ? Math.round(DRAFT_BOARD_EXTRA_HEIGHT * preset.scale) : 0);
+  if (overlayMenuOpen) {
+    width = Math.max(width, Math.round(OVERLAY_MENU_WIDTH * preset.scale));
+    height = Math.max(height, Math.round(OVERLAY_MENU_HEIGHT * preset.scale));
+  }
   if (mainWindow && !mainWindow.isDestroyed()) {
-    const [x, y] = mainWindow.getPosition();
+    let [x, y] = mainWindow.getPosition();
+    if (overlayMenuOpen) {
+      // Grow from the pre-menu top-left, nudged back on-screen if the bigger
+      // window would overflow the display; closing restores the original spot.
+      if (!overlayMenuAnchor) overlayMenuAnchor = { x, y };
+      const area = screen.getDisplayMatching({ x, y, width, height }).workArea;
+      x = Math.max(area.x, Math.min(overlayMenuAnchor.x, area.x + area.width - width));
+      y = Math.max(area.y, Math.min(overlayMenuAnchor.y, area.y + area.height - height));
+    } else if (overlayMenuAnchor) {
+      x = overlayMenuAnchor.x;
+      y = overlayMenuAnchor.y;
+      overlayMenuAnchor = null;
+    }
+    suppressPositionSave = true;
     mainWindow.setBounds({ x, y, width, height });
+    setTimeout(() => {
+      suppressPositionSave = false;
+    }, 400);
     mainWindow.webContents.send("settings", { fontSizePx: BASE_FONT_PX * preset.scale, opacity: overlaySettings.opacity, theme: overlaySettings.theme });
   }
 }
@@ -706,6 +727,7 @@ function applyOverlaySettings(settings: OverlaySettings): void {
 function toggleInteractive(): void {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   interactive = !interactive;
+  overlayHotspotClickable = false;
   mainWindow.setIgnoreMouseEvents(!interactive, { forward: true });
   mainWindow.webContents.send("interactive-changed", interactive);
   rebuildTrayMenu();
@@ -887,20 +909,56 @@ function buildMenuTemplate(): MenuItemConstructorOptions[] {
 }
 
 /**
- * 2026-10-02: "a menu icon directly on the overlay so I can open stuff
- * easily from MTG Arena." The overlay is click-through (so it never gets in
- * the way of the game), which is why the menu button asks main to make the
- * window clickable only while the cursor is actually over it
- * (overlay-set-clickable below) - everywhere else clicks still fall through
- * to Arena. Clicking it pops up the same menu the tray has, preceded by the
- * two shortcuts the overlay's own rows offer (current deck, live draft).
- * A native popup menu rather than an in-overlay dropdown: the overlay window
- * is small and fixed-size, and this needs no extra layout or window growth.
- * Click-through is restored when the menu closes, in case the button never
- * receives its own mouse-leave while the menu is up.
+ * 2026-10-02: "a menu icon directly on the overlay so I can open stuff easily
+ * from MTG Arena." The overlay is click-through (so it never gets in the way of
+ * the game), and its clickable spots - the menu button, plus the current-event
+ * and draft rows - work in locked mode too:
+ *
+ * The renderer (overlay-renderer.js) reports where those spots are, and main
+ * polls the real cursor position against them a few times a second, flipping
+ * the window between click-through and clickable. (The first version relied on
+ * the page receiving forwarded mouse-move events instead, which never worked
+ * reliably - over the panel's window-drag region, and not at all on some
+ * platforms.) Everything else on the overlay still lets clicks fall through to
+ * Arena.
  */
-function openOverlayMenu(): void {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
+let overlayHotspots: Array<{ x: number; y: number; width: number; height: number }> = [];
+let overlayHotspotClickable = false;
+let overlayHotspotTimer: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * The menu itself is drawn INSIDE the overlay window (the same entries as the
+ * tray, as a list in overlay.html's #menu-panel), not as a native popup: a
+ * native menu doesn't reliably show above Arena when it's fullscreen (found
+ * 2026-10-02), while the overlay window already does. The window grows to make
+ * room while the menu is open, like the draft board (applyWindowBounds), and
+ * closes itself after the cursor has been away from it for a moment - clicks
+ * outside the window go to Arena, which can't tell us to close it.
+ */
+const OVERLAY_MENU_WIDTH = 320;
+const OVERLAY_MENU_HEIGHT = 470;
+const OVERLAY_MENU_AWAY_CLOSE_MS = 1500;
+let overlayMenuOpen = false;
+let overlayMenuAnchor: { x: number; y: number } | null = null;
+let overlayMenuAwaySince: number | null = null;
+let overlayMenuActions = new Map<number, () => void>();
+let suppressPositionSave = false;
+
+interface OverlayMenuEntry {
+  id: number;
+  kind: "item" | "checkbox" | "separator";
+  label: string;
+  checked: boolean;
+  enabled: boolean;
+  hint: string;
+}
+
+function acceleratorHint(accelerator: unknown): string {
+  return typeof accelerator === "string" ? accelerator.replace("CommandOrControl", process.platform === "darwin" ? "Cmd" : "Ctrl").replace(/\+/g, "+") : "";
+}
+
+/** The tray's menu plus two shortcuts, flattened for the renderer; clicks are looked up by id (overlayMenuActions). */
+function buildOverlayMenuModel(): OverlayMenuEntry[] {
   const template: MenuItemConstructorOptions[] = [
     {
       label: "Current Event Deck",
@@ -915,12 +973,76 @@ function openOverlayMenu(): void {
     { type: "separator" },
     ...buildMenuTemplate(),
   ];
-  Menu.buildFromTemplate(template).popup({
-    window: mainWindow,
-    callback: () => {
-      if (mainWindow && !mainWindow.isDestroyed() && !interactive) mainWindow.setIgnoreMouseEvents(true, { forward: true });
-    },
+  overlayMenuActions = new Map();
+  let nextId = 0;
+  return template.map((t): OverlayMenuEntry => {
+    if (t.type === "separator") return { id: -1, kind: "separator", label: "", checked: false, enabled: false, hint: "" };
+    const id = nextId++;
+    const click = t.click as unknown as ((...args: unknown[]) => void) | undefined;
+    const enabled = t.enabled !== false && typeof click === "function";
+    if (enabled && click) overlayMenuActions.set(id, () => click(undefined, undefined, undefined));
+    return {
+      id,
+      kind: t.type === "checkbox" ? "checkbox" : "item",
+      label: String(t.label ?? ""),
+      checked: t.checked === true,
+      enabled,
+      hint: acceleratorHint(t.accelerator),
+    };
   });
+}
+
+function openOverlayMenu(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  overlayMenuOpen = true;
+  overlayMenuAwaySince = null;
+  applyWindowBounds();
+  mainWindow.setIgnoreMouseEvents(false);
+  overlayHotspotClickable = true;
+  mainWindow.webContents.send("overlay-menu", { open: true, entries: buildOverlayMenuModel() });
+}
+
+function closeOverlayMenu(): void {
+  if (!overlayMenuOpen) return;
+  overlayMenuOpen = false;
+  overlayMenuAwaySince = null;
+  overlayHotspotClickable = false;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("overlay-menu", { open: false, entries: [] });
+    applyWindowBounds(); // shrinks back and restores the pre-menu position
+    if (!interactive) mainWindow.setIgnoreMouseEvents(true, { forward: true });
+  }
+}
+
+function updateOverlayHotspotState(): void {
+  if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible()) return;
+  const cursor = screen.getCursorScreenPoint();
+  const bounds = mainWindow.getContentBounds();
+  const x = cursor.x - bounds.x;
+  const y = cursor.y - bounds.y;
+
+  if (overlayMenuOpen) {
+    const inWindow = x >= 0 && y >= 0 && x <= bounds.width && y <= bounds.height;
+    if (inWindow) {
+      overlayMenuAwaySince = null;
+    } else if (overlayMenuAwaySince === null) {
+      overlayMenuAwaySince = Date.now();
+    } else if (Date.now() - overlayMenuAwaySince > OVERLAY_MENU_AWAY_CLOSE_MS) {
+      closeOverlayMenu();
+    }
+    return; // the whole window is clickable while the menu is up
+  }
+  if (interactive) return; // unlocked = clickable everywhere already
+
+  const inside = overlayHotspots.some((r) => x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height);
+  if (inside === overlayHotspotClickable) return;
+  overlayHotspotClickable = inside;
+  mainWindow.setIgnoreMouseEvents(!inside, { forward: true });
+}
+
+function startOverlayHotspotWatcher(): void {
+  if (overlayHotspotTimer) return;
+  overlayHotspotTimer = setInterval(updateOverlayHotspotState, 60);
 }
 
 function createTray(): Tray {
@@ -1866,14 +1988,34 @@ app.whenReady().then(() => {
     return { ok: true };
   });
 
-  // The overlay's menu button (see openOverlayMenu) - hover makes the
-  // otherwise click-through window clickable, click opens the menu.
-  ipcMain.on("overlay-set-clickable", (_event, clickable: unknown) => {
-    if (!mainWindow || mainWindow.isDestroyed() || interactive) return; // unlocked = already clickable everywhere
-    mainWindow.setIgnoreMouseEvents(clickable !== true, { forward: true });
+  // The overlay's clickable spots (menu button, current-event row, draft
+  // row): the renderer reports where they are; see updateOverlayHotspotState.
+  ipcMain.on("overlay-set-hotspots", (_event, rects: unknown) => {
+    if (!Array.isArray(rects)) return;
+    overlayHotspots = rects
+      .filter((r): r is { x: number; y: number; width: number; height: number } => {
+        return !!r && typeof r === "object" && ["x", "y", "width", "height"].every((k) => Number.isFinite((r as Record<string, unknown>)[k]));
+      })
+      .map((r) => ({ x: r.x, y: r.y, width: r.width, height: r.height }));
   });
+  // The ☰ button: opens the in-overlay menu, or closes it if already open.
   ipcMain.handle("open-overlay-menu", () => {
-    openOverlayMenu();
+    if (overlayMenuOpen) closeOverlayMenu();
+    else openOverlayMenu();
+    return { ok: true };
+  });
+  ipcMain.handle("close-overlay-menu", () => {
+    closeOverlayMenu();
+    return { ok: true };
+  });
+  ipcMain.handle("overlay-menu-action", (_event, id: unknown) => {
+    const action = typeof id === "number" ? overlayMenuActions.get(id) : undefined;
+    closeOverlayMenu(); // close first - some actions (hide overlay, quit) change the window itself
+    try {
+      action?.();
+    } catch (err) {
+      console.error("Overlay menu action failed:", err);
+    }
     return { ok: true };
   });
 
@@ -2032,6 +2174,7 @@ app.whenReady().then(() => {
   setInterval(checkArenaProcess, ARENA_POLL_INTERVAL_MS);
 
   globalShortcut.register("CommandOrControl+Shift+O", toggleInteractive);
+  startOverlayHotspotWatcher();
   // Milestone 11: show/hide the whole overlay window, independent of the unlock/drag toggle above.
   globalShortcut.register("CommandOrControl+Shift+H", toggleOverlayHidden);
   // Quit shortcut since this app deliberately has no dock icon/menu bar to quit from otherwise
