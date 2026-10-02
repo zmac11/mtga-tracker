@@ -4,6 +4,8 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { exec } from "node:child_process";
 import { CapturePipeline } from "../pipeline.js";
+import { LibraryTracker } from "../domain/libraryTracker.js";
+import { libraryFragmentHtml, type LibraryCardInfo } from "../libraryPanelHtml.js";
 import { LiveStateTracker, type OverlaySnapshot } from "../domain/liveState.js";
 import { TypedEventStore } from "../db/sqliteStore.js";
 import { CardStore } from "../cards/cardStore.js";
@@ -208,6 +210,17 @@ const DEFAULT_OVERLAY_THEME = "default";
  */
 const DRAFT_BOARD_EXTRA_WIDTH = 280;
 const DRAFT_BOARD_EXTRA_HEIGHT = 260;
+
+/**
+ * 2026-10-02: the in-game deck-list column (every card of your deck with
+ * copies left in the library and the next-draw odds - see
+ * domain/libraryTracker.ts). Like the draft board, the window grows to make
+ * room for it while a game is being played, scaled by the size preset; the
+ * extra height is what lets a whole limited/constructed decklist show
+ * without scrolling.
+ */
+const LIBRARY_PANEL_EXTRA_WIDTH = 260;
+const LIBRARY_PANEL_EXTRA_HEIGHT = 300;
 
 const DEFAULT_OPACITY = 0.72; // matches the panel's original hardcoded background alpha
 const MIN_OPACITY = 0.2;
@@ -636,6 +649,9 @@ function createWindow(settings: OverlaySettings): BrowserWindow {
   win.on("moved", () => {
     if (suppressPositionSave) return; // programmatic move (the menu opening near a screen edge) - not where the user put it
     const [wx, wy] = win.getPosition();
+    // Dragged while grown (menu / draft board / deck-list column): that is
+    // the user's new spot - remember it as the one to shrink back to.
+    if (overlayMenuAnchor) overlayMenuAnchor = { x: wx, y: wy };
     savePosition(wx, wy);
   });
 
@@ -666,6 +682,9 @@ function createWindow(settings: OverlaySettings): BrowserWindow {
  */
 let overlayDraftExpanded = false;
 
+/** 2026-10-02: true while the window is grown for the in-game deck-list column (see LIBRARY_PANEL_EXTRA_WIDTH). Derived from live game state, not a persisted setting. */
+let overlayLibraryExpanded = false;
+
 /**
  * Milestone 23: applies the current overlaySettings (size preset) AND the
  * current overlayDraftExpanded state to the already-running window in one
@@ -678,17 +697,26 @@ let overlayDraftExpanded = false;
  */
 function applyWindowBounds(): void {
   const preset = SIZE_PRESETS[overlaySettings.sizePreset] ?? SIZE_PRESETS[DEFAULT_SIZE_PRESET];
-  let width = preset.width + (overlayDraftExpanded ? Math.round(DRAFT_BOARD_EXTRA_WIDTH * preset.scale) : 0);
-  let height = preset.height + (overlayDraftExpanded ? Math.round(DRAFT_BOARD_EXTRA_HEIGHT * preset.scale) : 0);
+  let width = preset.width;
+  let height = preset.height;
+  if (overlayDraftExpanded) {
+    width += Math.round(DRAFT_BOARD_EXTRA_WIDTH * preset.scale);
+    height += Math.round(DRAFT_BOARD_EXTRA_HEIGHT * preset.scale);
+  } else if (overlayLibraryExpanded) {
+    width += Math.round(LIBRARY_PANEL_EXTRA_WIDTH * preset.scale);
+    height += Math.round(LIBRARY_PANEL_EXTRA_HEIGHT * preset.scale);
+  }
   if (overlayMenuOpen) {
     width = Math.max(width, Math.round(OVERLAY_MENU_WIDTH * preset.scale));
     height = Math.max(height, Math.round(OVERLAY_MENU_HEIGHT * preset.scale));
   }
   if (mainWindow && !mainWindow.isDestroyed()) {
     let [x, y] = mainWindow.getPosition();
-    if (overlayMenuOpen) {
-      // Grow from the pre-menu top-left, nudged back on-screen if the bigger
-      // window would overflow the display; closing restores the original spot.
+    const grown = width > preset.width || height > preset.height;
+    if (grown) {
+      // Grow from the normal top-left, nudged back on-screen if the bigger
+      // window would overflow the display (the overlay lives near the right
+      // edge by default); shrinking back restores the original spot.
       if (!overlayMenuAnchor) overlayMenuAnchor = { x, y };
       const area = screen.getDisplayMatching({ x, y, width, height }).workArea;
       x = Math.max(area.x, Math.min(overlayMenuAnchor.x, area.x + area.width - width));
@@ -715,6 +743,13 @@ function applyWindowBounds(): void {
 function setOverlayDraftExpanded(expanded: boolean): void {
   if (expanded === overlayDraftExpanded) return;
   overlayDraftExpanded = expanded;
+  applyWindowBounds();
+}
+
+/** 2026-10-02: grows/shrinks the overlay for the in-game deck-list column; a no-op when nothing changes (safe to call on every update). */
+function setOverlayLibraryExpanded(expanded: boolean): void {
+  if (expanded === overlayLibraryExpanded) return;
+  overlayLibraryExpanded = expanded;
   applyWindowBounds();
 }
 
@@ -2132,6 +2167,67 @@ app.whenReady().then(() => {
       // are rare - once per event entered, nothing like per-match volume).
       if (event.kind === "DraftJoined") checkPendingClosures();
       sendSnapshot(snap);
+    });
+    // 2026-10-02: in-game library tracking (domain/libraryTracker.ts). It reads
+    // the raw GRE messages itself (the classifier only emits persisted domain
+    // events, and the library is live-only state), so it hangs off every
+    // processed block rather than off domainEvent.
+    const libraryTracker = new LibraryTracker();
+    const libraryCardInfo = new Map<number, LibraryCardInfo>();
+    let libraryGameOver = false;
+    let lastLibraryConnects = 0;
+    let lastLibraryHtml: string | null | undefined;
+    const resolveLibraryCards = (grpIds: number[]) => {
+      const missing = grpIds.filter((g) => !libraryCardInfo.has(g));
+      if (missing.length === 0) return;
+      let cardStore: CardStore | null = null;
+      try {
+        cardStore = new CardStore(join(pipeline.dataDir, "tracker.db"));
+        for (const g of missing) {
+          const c = cardStore.get(g);
+          if (c) libraryCardInfo.set(g, { name: c.name, manaCost: c.manaCost, types: c.types });
+        }
+      } catch (err) {
+        console.error("Library panel: card lookup failed:", err);
+      } finally {
+        cardStore?.close();
+      }
+    };
+    const refreshLibraryPanel = () => {
+      const snap = libraryTracker.snapshot();
+      const visible = snap !== null && !libraryGameOver;
+      let html: string | null = null;
+      if (visible && snap) {
+        resolveLibraryCards(snap.entries.map((e) => e.grpId));
+        html = libraryFragmentHtml(snap, libraryCardInfo);
+      }
+      setOverlayLibraryExpanded(visible);
+      if (html === lastLibraryHtml) return;
+      lastLibraryHtml = html;
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("library", { html });
+    };
+    pipeline.on("processed", ({ block }: { block: { json: unknown } }) => {
+      try {
+        if (!libraryTracker.feed(block.json)) return;
+        if (libraryTracker.connectCount !== lastLibraryConnects) {
+          lastLibraryConnects = libraryTracker.connectCount;
+          libraryGameOver = false; // a new game's connect message
+        }
+        refreshLibraryPanel();
+      } catch (err) {
+        console.error("Library tracking failed:", err);
+      }
+    });
+    // The game ending hides the column (the library is meaningless after it);
+    // the next game's connect message brings it back.
+    pipeline.on("domainEvent", (event) => {
+      if (event.kind === "GameStateSnapshot" && event.stage === "GameStage_GameOver") {
+        libraryGameOver = true;
+        refreshLibraryPanel();
+      } else if (event.kind === "MatchCompleted") {
+        libraryGameOver = true;
+        refreshLibraryPanel();
+      }
     });
     pipeline.on("error", (err) => console.error("Tailer error:", err));
     pipeline.start();

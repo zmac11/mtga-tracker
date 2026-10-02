@@ -36,6 +36,11 @@ contextBridge.exposeInMainWorld("overlay", {
   openMenu: () => ipcRenderer.invoke("open-overlay-menu"),
   closeMenu: () => ipcRenderer.invoke("close-overlay-menu"),
   menuAction: (id) => ipcRenderer.invoke("overlay-menu-action", id),
+  // 2026-10-02: the in-game deck-list column (library tracking) - main pushes
+  // a pre-rendered, trusted HTML fragment (libraryPanelHtml.ts), or null to hide it.
+  onLibrary: (callback) => {
+    ipcRenderer.on("library", (_event, payload) => callback(payload));
+  },
   onMenu: (callback) => {
     ipcRenderer.on("overlay-menu", (_event, payload) => callback(payload));
   },

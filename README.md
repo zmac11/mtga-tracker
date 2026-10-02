@@ -125,6 +125,15 @@ Click the overlay's current-event label (once you're in a match or draft)
 to open its **deck viewer** in your browser; a running draft also gets a
 **draft progress** page that keeps itself up to date while you're picking.
 
+During a game the overlay grows a second panel with your **whole decklist**:
+for every card, how many copies are still in your library and the chance
+the next card you draw is that one. It follows Arena's own library: cards
+you put on the bottom (a London mulligan, say) are known to be there and
+can't be drawn until the unknown cards run out, and a shuffle makes the
+whole library random again. It needs to have seen the game start - if the
+tracker is launched mid-game the panel stays hidden (or shows a `~` if some
+cards couldn't be matched) rather than guessing.
+
 **On Windows**, run Arena in **Borderless Windowed** mode (Arena's own
 Options > Graphics setting), not true exclusive Fullscreen - an
 always-on-top window like this overlay generally can't draw above an

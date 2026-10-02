@@ -46,6 +46,11 @@
         <span class="event-wl" id="event-wl"></span>
       </div>
     </div>
+    <!-- In-game deck list (library tracking): copies left + next-draw odds per
+         card. A second panel to the right of the main one; main.ts grows the
+         window while it is shown. Content is a trusted pre-rendered fragment
+         (libraryPanelHtml.ts) - see overlay-renderer.js's onLibrary. -->
+    <div id="deck-list" class="deck-list hidden"></div>
     <!-- DOM order matters here: Chromium builds the window's draggable region by
          walking elements in order (drag = add, no-drag = subtract), so this
          no-drag button has to come AFTER the .panel (a drag region) or the

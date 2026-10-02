@@ -225,6 +225,23 @@ function renderMenu({ open, entries }) {
   queueHotspotReport();
 }
 window.overlay.onMenu(renderMenu);
+
+// 2026-10-02: the in-game deck-list column. main.ts sends a trusted,
+// pre-rendered HTML fragment (libraryPanelHtml.ts - names escaped there) or
+// null once the game is over; it also grows/shrinks the window to match, this
+// only fills and shows/hides the panel.
+const deckList = document.getElementById("deck-list");
+window.overlay.onLibrary(({ html }) => {
+  if (html) {
+    deckList.innerHTML = html;
+    deckList.classList.remove("hidden");
+    document.body.classList.add("has-library");
+  } else {
+    deckList.classList.add("hidden");
+    deckList.innerHTML = "";
+    document.body.classList.remove("has-library");
+  }
+});
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") window.overlay.closeMenu();
 });
