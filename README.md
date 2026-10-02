@@ -141,6 +141,16 @@ carries over between games, so in game 2 you can see what he played in game
 1 and could play again. Basic lands are left out. This memory is live only:
 if you restart the tracker between games it starts the match over.
 
+The panel's **Search** tab searches the cards of the set you're playing
+(Draft/Sealed events; the set comes from the event name). It filters by
+color chips that start on the colors your opponent seems to be playing -
+inferred from the basic lands and spells he's shown - so a Mountain plus a
+Forest hides white, blue and black cards. Click a chip to change the
+filter by hand, or "Opp. colors" to go back to following him. Typing needs
+the overlay to take keyboard focus: click the search box (it's clickable
+even while the overlay is locked), type, and press Esc to hand focus back
+to Arena.
+
 **On Windows**, run Arena in **Borderless Windowed** mode (Arena's own
 Options > Graphics setting), not true exclusive Fullscreen - an
 always-on-top window like this overlay generally can't draw above an

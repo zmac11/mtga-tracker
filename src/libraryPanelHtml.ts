@@ -16,6 +16,8 @@ export interface LibraryCardInfo {
   manaCost: string | null;
   /** Decoded Arena types ("Land", "Creature", ...). */
   types: string[];
+  /** WUBRG letters; used to infer the opponent's colors. */
+  colors?: string[];
 }
 
 /** Rough mana value from a "{2}{R}{R}" string: numbers add up, X is 0, any other symbol (colored, hybrid, phyrexian) counts 1. */

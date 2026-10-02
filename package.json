@@ -49,7 +49,7 @@
     "test:opponenthtml": "tsx src/opponentHtml.test.ts",
     "test:statshtml": "tsx src/statsHtml.test.ts",
     "test:cardsituationalwinratehtml": "tsx src/cardSituationalWinRateHtml.test.ts",
-    "test": "npm run test:parser && npm run test:classifier && npm run test:livestate && npm run test:jsonstream && npm run test:tailer && npm run test:scryfall && npm run test:draftprogress && npm run test:draftwheel && npm run test:deckviewer && npm run test:eventhistory && npm run test:extractcards && npm run test:deckcolors && npm run test:colorrollup && npm run test:eventidentity && npm run test:manacurve && npm run test:rollups && npm run test:deckversions && npm run test:rewardrollup && npm run test:rewardhistory && npm run test:arenaexport && npm run test:draftpickpriority && npm run test:matchdetails && npm run test:opponentstats && npm run test:statsrollup && npm run test:cardsituationalwinrate && npm run test:deckshare && npm run test:draftpickstatshtml && npm run test:opponenthtml && npm run test:statshtml && npm run test:cardsituationalwinratehtml && npm run test:catchup && npm run test:eventclosure && npm run test:courseruns && npm run test:runstatus && npm run test:librarytracker && npm run test:librarypanel",
+    "test": "npm run test:parser && npm run test:classifier && npm run test:livestate && npm run test:jsonstream && npm run test:tailer && npm run test:scryfall && npm run test:draftprogress && npm run test:draftwheel && npm run test:deckviewer && npm run test:eventhistory && npm run test:extractcards && npm run test:deckcolors && npm run test:colorrollup && npm run test:eventidentity && npm run test:manacurve && npm run test:rollups && npm run test:deckversions && npm run test:rewardrollup && npm run test:rewardhistory && npm run test:arenaexport && npm run test:draftpickpriority && npm run test:matchdetails && npm run test:opponentstats && npm run test:statsrollup && npm run test:cardsituationalwinrate && npm run test:deckshare && npm run test:draftpickstatshtml && npm run test:opponenthtml && npm run test:statshtml && npm run test:cardsituationalwinratehtml && npm run test:catchup && npm run test:eventclosure && npm run test:courseruns && npm run test:runstatus && npm run test:librarytracker && npm run test:librarypanel && npm run test:opponentcolors && npm run test:setsearch",
     "backfill": "tsx src/backfill.ts",
     "report": "tsx src/report.ts",
     "overlay": "npm run build && electron .",
@@ -66,7 +66,9 @@
     "test:courseruns": "tsx src/domain/courseRuns.test.ts",
     "test:runstatus": "tsx src/domain/runStatus.test.ts",
     "test:librarytracker": "tsx src/domain/libraryTracker.test.ts",
-    "test:librarypanel": "tsx src/libraryPanelHtml.test.ts"
+    "test:librarypanel": "tsx src/libraryPanelHtml.test.ts",
+    "test:opponentcolors": "tsx src/domain/opponentColors.test.ts",
+    "test:setsearch": "tsx src/setSearch.test.ts"
   },
   "dependencies": {
     "chokidar": "^3.6.0"

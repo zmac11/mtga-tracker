@@ -226,29 +226,173 @@ function renderMenu({ open, entries }) {
 }
 window.overlay.onMenu(renderMenu);
 
-// 2026-10-02: the in-game deck-list column. main.ts sends a trusted,
-// pre-rendered HTML fragment (libraryPanelHtml.ts - names escaped there) or
+// 2026-10-02: the in-game side column. main.ts sends a trusted, pre-rendered
+// HTML fragment for the Deck tab (libraryPanelHtml.ts - names escaped there) or
 // null once the game is over; it also grows/shrinks the window to match, this
-// only fills and shows/hides the panel.
+// only fills and shows/hides the column. The Search tab is a set-card search
+// over the list main.ts pushes ("set-cards"), filtered by color chips that
+// default to the colors the opponent seems to be playing.
 const deckList = document.getElementById("deck-list");
-window.overlay.onLibrary(({ html }) => {
-  if (html) {
-    deckList.innerHTML = html;
-    deckList.classList.remove("hidden");
-    document.body.classList.add("has-library");
-  } else {
-    deckList.classList.add("hidden");
-    deckList.innerHTML = "";
-    document.body.classList.remove("has-library");
+const dlLibrary = document.getElementById("dl-library");
+const dlSearch = document.getElementById("dl-search");
+const tabDeck = document.getElementById("tab-deck");
+const tabSearch = document.getElementById("tab-search");
+const searchInput = document.getElementById("search-input");
+const searchChips = document.getElementById("search-chips");
+const searchMeta = document.getElementById("search-meta");
+const searchResults = document.getElementById("search-results");
+
+const COLOR_LETTERS = ["W", "U", "B", "R", "G"];
+const MAX_SEARCH_RESULTS = 60;
+let setCards = []; // [{g, n, mc, c, t, r, o}] for the current event's set
+let setCode = null;
+let oppColors = []; // colors the opponent seems to be in (from main)
+let manualColors = null; // Set of colors once the user touched a chip; null = follow the opponent
+let activeTab = "deck";
+
+function selectedColors() {
+  if (manualColors) return manualColors;
+  // Nothing known about the opponent yet: no filtering at all.
+  return new Set(oppColors.length > 0 ? oppColors : COLOR_LETTERS);
+}
+
+function manaValueOf(cost) {
+  if (!cost) return 0;
+  let total = 0;
+  for (const m of cost.matchAll(/\{([^}]+)\}/g)) {
+    if (/^\d+$/.test(m[1])) total += Number(m[1]);
+    else if (!["X", "Y", "Z"].includes(m[1])) total += 1;
+  }
+  return total;
+}
+
+function renderChips() {
+  const selected = selectedColors();
+  searchChips.innerHTML = "";
+  for (const letter of COLOR_LETTERS) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = selected.has(letter) ? "search-chip on" : "search-chip";
+    chip.dataset.c = letter;
+    chip.textContent = letter;
+    chip.addEventListener("click", () => {
+      const next = new Set(selectedColors());
+      if (next.has(letter)) next.delete(letter);
+      else next.add(letter);
+      manualColors = next;
+      renderSearch();
+    });
+    searchChips.appendChild(chip);
+  }
+  const auto = document.createElement("button");
+  auto.type = "button";
+  auto.className = manualColors ? "search-auto" : "search-auto on";
+  auto.textContent = "Opp. colors";
+  auto.title = "Filter to the colors the opponent seems to be playing (from the lands and spells they have shown)";
+  auto.addEventListener("click", () => {
+    manualColors = null;
+    renderSearch();
+  });
+  searchChips.appendChild(auto);
+}
+
+function renderSearch() {
+  renderChips();
+  const selected = selectedColors();
+  const terms = searchInput.value.toLowerCase().split(/\s+/).filter(Boolean);
+  const matches = setCards.filter((card) => {
+    if (!card.c.every((c) => selected.has(c))) return false; // multicolor needs every color selected; colorless always passes
+    if (terms.length === 0) return true;
+    const hay = `${card.n} ${card.t.join(" ")} ${card.o || ""}`.toLowerCase();
+    return terms.every((t) => hay.includes(t));
+  });
+  matches.sort((a, b) => manaValueOf(a.mc) - manaValueOf(b.mc) || a.n.localeCompare(b.n));
+  const shown = matches.slice(0, MAX_SEARCH_RESULTS);
+  searchMeta.textContent = setCode
+    ? `${setCode}: ${matches.length} card${matches.length === 1 ? "" : "s"}${matches.length > shown.length ? ` (first ${shown.length})` : ""}`
+    : "No set known yet - start a match or draft.";
+  searchResults.innerHTML = "";
+  for (const card of shown) {
+    const row = document.createElement("div");
+    row.className = `search-row ${card.r || ""}`;
+    const top = document.createElement("div");
+    top.className = "sr-top";
+    const name = document.createElement("span");
+    name.className = "sr-name";
+    name.textContent = card.n;
+    const cost = document.createElement("span");
+    cost.className = "sr-cost";
+    cost.textContent = (card.mc || "").replace(/[{}]/g, "");
+    top.appendChild(name);
+    top.appendChild(cost);
+    const sub = document.createElement("div");
+    sub.className = "sr-sub";
+    sub.textContent = card.t.join(" ");
+    row.appendChild(top);
+    row.appendChild(sub);
+    if (card.o) {
+      const text = document.createElement("div");
+      text.className = "sr-text";
+      text.textContent = card.o;
+      row.appendChild(text);
+    }
+    searchResults.appendChild(row);
+  }
+}
+
+function showTab(tab) {
+  activeTab = tab;
+  tabDeck.classList.toggle("active", tab === "deck");
+  tabSearch.classList.toggle("active", tab === "search");
+  dlLibrary.classList.toggle("hidden", tab !== "deck");
+  dlSearch.classList.toggle("hidden", tab !== "search");
+  if (tab === "search") renderSearch();
+  else window.overlay.setFocus(false);
+  queueHotspotReport();
+}
+tabDeck.addEventListener("click", () => showTab("deck"));
+tabSearch.addEventListener("click", () => {
+  showTab("search");
+  searchInput.focus();
+});
+searchInput.addEventListener("focus", () => window.overlay.setFocus(true));
+searchInput.addEventListener("input", renderSearch);
+searchInput.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    searchInput.blur();
+    window.overlay.setFocus(false);
+    event.stopPropagation();
   }
 });
-document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") window.overlay.closeMenu();
+
+window.overlay.onSetCards((payload) => {
+  setCards = Array.isArray(payload.cards) ? payload.cards : [];
+  setCode = payload.setCode || null;
+  if (activeTab === "search") renderSearch();
+});
+
+window.overlay.onLibrary(({ html, oppColors: colors }) => {
+  oppColors = Array.isArray(colors) ? colors : [];
+  if (html) {
+    dlLibrary.innerHTML = html;
+    deckList.classList.remove("hidden");
+    document.body.classList.add("has-library");
+    if (activeTab === "search") renderSearch(); // the default color filter may have moved
+  } else {
+    deckList.classList.add("hidden");
+    dlLibrary.innerHTML = "";
+    document.body.classList.remove("has-library");
+    manualColors = null; // a new game starts from the opponent's colors again
+    window.overlay.setFocus(false);
+  }
+  queueHotspotReport();
 });
 
 function reportHotspots() {
   const rects = [];
-  for (const el of [menuBtn, els.eventRecord, els.draftProgress]) {
+  const targets = [menuBtn, els.eventRecord, els.draftProgress];
+  if (!deckList.classList.contains("hidden")) targets.push(activeTab === "search" ? deckList : document.getElementById("dl-tabs"));
+  for (const el of targets) {
     if (el.classList.contains("hidden")) continue;
     const r = el.getBoundingClientRect();
     if (r.width <= 0 || r.height <= 0) continue;

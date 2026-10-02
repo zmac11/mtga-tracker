@@ -6,6 +6,8 @@ import { exec } from "node:child_process";
 import { CapturePipeline } from "../pipeline.js";
 import { LibraryTracker } from "../domain/libraryTracker.js";
 import { libraryFragmentHtml, type LibraryCardInfo } from "../libraryPanelHtml.js";
+import { inferOpponentColors } from "../domain/opponentColors.js";
+import { buildSetSearchCards } from "../setSearch.js";
 import { LiveStateTracker, type OverlaySnapshot } from "../domain/liveState.js";
 import { TypedEventStore } from "../db/sqliteStore.js";
 import { CardStore } from "../cards/cardStore.js";
@@ -2039,6 +2041,14 @@ app.whenReady().then(() => {
     else openOverlayMenu();
     return { ok: true };
   });
+  // The set search box needs real keyboard focus (the overlay otherwise never
+  // takes it, so Arena keeps getting keystrokes); hand it over while typing
+  // and give it back afterwards.
+  ipcMain.on("overlay-focus", (_event, focus: unknown) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (focus === true) mainWindow.focus();
+    else mainWindow.blur();
+  });
   ipcMain.handle("close-overlay-menu", () => {
     closeOverlayMenu();
     return { ok: true };
@@ -2084,6 +2094,30 @@ app.whenReady().then(() => {
     }
   };
 
+  // 2026-10-02: the overlay's set-card search filters a compact list of the
+  // current event's set in memory. Which set follows the match/event being
+  // played (event ids look like "QuickDraft_HOB_20260915"); the list is only
+  // rebuilt and re-sent when that set changes.
+  let searchSetCode: string | null | undefined;
+  const pushSetSearchCatalog = (snap: OverlaySnapshot = liveState.snapshot()) => {
+    const eventId = snap.match?.eventId ?? snap.eventRecord?.eventId ?? null;
+    const setCode = eventId ? (parseEventIdentity(eventId).setCode?.toUpperCase() ?? null) : null;
+    if (setCode === searchSetCode) return;
+    searchSetCode = setCode;
+    let cards: ReturnType<typeof buildSetSearchCards> = [];
+    if (setCode) {
+      const cardStore = new CardStore(join(pipeline.dataDir, "tracker.db"));
+      try {
+        cards = buildSetSearchCards(cardStore.all(), setCode);
+      } catch (err) {
+        console.error("Set search: failed to load the set's cards:", err);
+      } finally {
+        cardStore.close();
+      }
+    }
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("set-cards", { setCode, cards });
+  };
+
   const sendSnapshot = (snap: OverlaySnapshot = liveState.snapshot()) => {
     if (!mainWindow || mainWindow.isDestroyed()) return;
     mainWindow.webContents.send("state", {
@@ -2103,6 +2137,7 @@ app.whenReady().then(() => {
     refreshDraftBoardHtml(initialSnap);
     setOverlayDraftExpanded(initialSnap.currentDraft !== null);
     sendSnapshot(initialSnap);
+    pushSetSearchCatalog(initialSnap);
     // Milestone 9+: the window was already created at the right *size* for
     // overlaySettings (createWindow used it directly), but the renderer
     // still needs telling what font-size/opacity that corresponds to -
@@ -2167,6 +2202,7 @@ app.whenReady().then(() => {
       // are rare - once per event entered, nothing like per-match volume).
       if (event.kind === "DraftJoined") checkPendingClosures();
       sendSnapshot(snap);
+      pushSetSearchCatalog(snap);
     });
     // 2026-10-02: in-game library tracking (domain/libraryTracker.ts). It reads
     // the raw GRE messages itself (the classifier only emits persisted domain
@@ -2176,7 +2212,7 @@ app.whenReady().then(() => {
     const libraryCardInfo = new Map<number, LibraryCardInfo>();
     let libraryGameOver = false;
     let lastLibraryConnects = 0;
-    let lastLibraryHtml: string | null | undefined;
+    let lastLibraryHtml: string | undefined;
     const resolveLibraryCards = (grpIds: number[]) => {
       const missing = grpIds.filter((g) => !libraryCardInfo.has(g));
       if (missing.length === 0) return;
@@ -2185,7 +2221,7 @@ app.whenReady().then(() => {
         cardStore = new CardStore(join(pipeline.dataDir, "tracker.db"));
         for (const g of missing) {
           const c = cardStore.get(g);
-          if (c) libraryCardInfo.set(g, { name: c.name, manaCost: c.manaCost, types: c.types });
+          if (c) libraryCardInfo.set(g, { name: c.name, manaCost: c.manaCost, types: c.types, colors: c.colors.length > 0 ? c.colors : (c.scryfallColors ?? []) });
         }
       } catch (err) {
         console.error("Library panel: card lookup failed:", err);
@@ -2198,14 +2234,18 @@ app.whenReady().then(() => {
       const opp = libraryTracker.opponentSnapshot();
       const visible = (snap !== null || opp !== null) && !libraryGameOver;
       let html: string | null = null;
+      let oppColors: string[] = [];
       if (visible) {
         resolveLibraryCards([...(snap?.entries.map((e) => e.grpId) ?? []), ...(opp?.entries.map((e) => e.grpId) ?? [])]);
         html = libraryFragmentHtml(snap, libraryCardInfo, opp) || null;
+        // Colors the opponent seems to be in (basic lands + spells shown) - the set search's default filter.
+        if (opp) oppColors = inferOpponentColors(opp.entries.map((e) => e.grpId), (g) => libraryCardInfo.get(g));
       }
       setOverlayLibraryExpanded(html !== null);
-      if (html === lastLibraryHtml) return;
-      lastLibraryHtml = html;
-      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("library", { html });
+      const key = `${html ?? ""}|${oppColors.join("")}`;
+      if (key === lastLibraryHtml) return;
+      lastLibraryHtml = key;
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("library", { html, oppColors });
     };
     pipeline.on("processed", ({ block }: { block: { json: unknown } }) => {
       try {

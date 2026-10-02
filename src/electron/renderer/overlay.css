@@ -546,7 +546,7 @@ body[data-theme="blue"] .deck-list {
   margin-right: 0;
 }
 
-.deck-list > .opp-section:first-child {
+.dl-view > .opp-section:first-child {
   flex: 1;
   max-height: none;
   margin-top: 0;
@@ -554,7 +554,7 @@ body[data-theme="blue"] .deck-list {
   border-top: 0;
 }
 
-.deck-list > .opp-section:first-child .lib-head {
+.dl-view > .opp-section:first-child .lib-head {
   margin-right: 3rem;
 }
 
@@ -567,3 +567,164 @@ body[data-theme="blue"] .deck-list {
 .opp-row {
   grid-template-columns: 1fr auto;
 }
+
+/* Deck / Search tabs inside the side column. The row keeps clear of the menu
+   button on the column's corner. */
+.dl-tabs {
+  display: flex;
+  gap: 0.4rem;
+  margin: 0 3rem 0.5rem 0;
+}
+
+.dl-tab {
+  padding: 0.2rem 0.8rem;
+  font: inherit;
+  font-size: 1.1rem;
+  color: rgba(255, 255, 255, 0.7);
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 0.5rem;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.dl-tab.active {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.6);
+}
+
+body[data-theme="blue"] .dl-tab.active {
+  background: rgba(110, 150, 255, 0.3);
+  border-color: rgba(150, 185, 255, 0.9);
+}
+
+.dl-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.search-input {
+  width: 100%;
+  padding: 0.35rem 0.6rem;
+  font: inherit;
+  font-size: 1.2rem;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 0.5rem;
+  outline: none;
+  user-select: text;
+  -webkit-app-region: no-drag;
+}
+
+.search-input:focus {
+  border-color: #fff;
+}
+
+.search-chips {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0.5rem 0 0.4rem;
+}
+
+.search-chip {
+  width: 2.2rem;
+  height: 2.2rem;
+  padding: 0;
+  font: inherit;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.55);
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.search-chip.on {
+  color: #111;
+  border-color: #fff;
+}
+
+.search-chip[data-c="W"].on { background: #f4efd6; }
+.search-chip[data-c="U"].on { background: #7db8ef; }
+.search-chip[data-c="B"].on { background: #b6a8b8; }
+.search-chip[data-c="R"].on { background: #ef8d73; }
+.search-chip[data-c="G"].on { background: #86c796; }
+
+.search-auto {
+  margin-left: 0.3rem;
+  padding: 0.15rem 0.6rem;
+  font: inherit;
+  font-size: 1rem;
+  color: rgba(255, 255, 255, 0.8);
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 0.5rem;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.search-auto.on {
+  border-color: #7be08a;
+  color: #7be08a;
+}
+
+.search-meta {
+  margin-bottom: 0.3rem;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 1rem;
+}
+
+.search-results {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-app-region: no-drag;
+}
+
+.search-row {
+  padding: 0.2rem 0;
+  line-height: 1.3;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.search-row .sr-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.search-row .sr-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+
+.search-row .sr-cost {
+  flex: none;
+  color: rgba(255, 255, 255, 0.7);
+  font-variant-numeric: tabular-nums;
+}
+
+.search-row .sr-sub {
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 0.95em;
+}
+
+.search-row .sr-text {
+  margin-top: 0.15rem;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 0.95em;
+  white-space: pre-line;
+}
+
+.search-row.rare .sr-name { color: #f0d27a; }
+.search-row.mythic .sr-name { color: #f0905a; }
+.search-row.uncommon .sr-name { color: #b8cfe0; }

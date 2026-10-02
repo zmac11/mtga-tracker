@@ -41,6 +41,12 @@ contextBridge.exposeInMainWorld("overlay", {
   onLibrary: (callback) => {
     ipcRenderer.on("library", (_event, payload) => callback(payload));
   },
+  // 2026-10-02: the set-card search: main pushes the current event's set as a
+  // compact card list; the search box needs real keyboard focus while typing.
+  onSetCards: (callback) => {
+    ipcRenderer.on("set-cards", (_event, payload) => callback(payload));
+  },
+  setFocus: (focus) => ipcRenderer.send("overlay-focus", focus === true),
   onMenu: (callback) => {
     ipcRenderer.on("overlay-menu", (_event, payload) => callback(payload));
   },

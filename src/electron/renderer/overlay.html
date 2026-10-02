@@ -50,7 +50,19 @@
          card. A second panel to the right of the main one; main.ts grows the
          window while it is shown. Content is a trusted pre-rendered fragment
          (libraryPanelHtml.ts) - see overlay-renderer.js's onLibrary. -->
-    <div id="deck-list" class="deck-list hidden"></div>
+    <div id="deck-list" class="deck-list hidden">
+      <div id="dl-tabs" class="dl-tabs">
+        <button id="tab-deck" class="dl-tab active" type="button">Deck</button>
+        <button id="tab-search" class="dl-tab" type="button" title="Search this set's cards, filtered to the opponent's colors">Search</button>
+      </div>
+      <div id="dl-library" class="dl-view"></div>
+      <div id="dl-search" class="dl-view hidden">
+        <input id="search-input" class="search-input" type="text" placeholder="Search this set..." autocomplete="off" spellcheck="false" />
+        <div id="search-chips" class="search-chips"></div>
+        <div id="search-meta" class="search-meta"></div>
+        <div id="search-results" class="search-results"></div>
+      </div>
+    </div>
     <!-- DOM order matters here: Chromium builds the window's draggable region by
          walking elements in order (drag = add, no-drag = subtract), so this
          no-drag button has to come AFTER the .panel (a drag region) or the
