@@ -695,7 +695,47 @@ function run() {
   assert.deepEqual([...game2Seat1Hand.grpIds].sort((a: number, b: number) => a - b), [301, 302]);
   assert.equal(game2Seat1Hand.gameNumber, 2);
 
-  console.log("OK: classifier handled draft pack/pick/complete, match found/completed, game-state noise filtering, Bot Draft's combined pick+next-pack response, deck submission's real sideboard/format capture, EventGetCoursesV2 standings plus the generic EventCardPool capture from a course's CardPool, a synthetic 'Pick Two' (2 cards per pick) extension of both draft paths, EventClaimPrize's real captured reward shape (including its own CardPool capture, a RewardGrant emitted alongside it, and rejecting a SourceId that doesn't match the course for EventReward while RewardGrant still captures it), RewardGrant's other three confirmed real sources (Mastery Pass tier reward via GraphProcessV2, plus Sealed's card-pool grant and entry-fee cost via EventJoin), and (milestone 23) GameHandResolved/CardPlayedInGame from a real-traced mulligan/bottom/play sequence, including a second game of the same match resetting tracking independently.");
+  // EventJoin's RESPONSE (confirmed real 2026-10-02, Sealed): carries the
+  // course itself plus the freshly-granted pool, so the pool and the run's
+  // CourseStanding are recorded at join time, not only once a later
+  // EventGetCoursesV2 listing happens to include them.
+  const cJoin = new Classifier();
+  const joined = cJoin.classify({
+    direction: "response",
+    method: "EventJoin",
+    ts: "2026-10-02T10:50:10Z",
+    json: {
+      Course: {
+        CourseId: "join-course-1",
+        InternalEventName: "Sealed_FRA_20260929",
+        CurrentModule: "DeckSelect",
+        CourseDeckSummary: { Attributes: [] },
+        CardPool: [11, 11, 12, 13],
+      },
+      InventoryInfo: { Changes: [{ Source: "EventGrantCardPool", SourceId: "Sealed_FRA_20260929" }] },
+    },
+  });
+  const joinStanding = joined.find((e) => e.kind === "CourseStanding") as any;
+  assert.ok(joinStanding);
+  assert.equal(joinStanding.courseId, "join-course-1");
+  assert.equal(joinStanding.currentModule, "DeckSelect");
+  assert.equal(joinStanding.wins, 0);
+  assert.equal(joinStanding.losses, 0);
+  const joinPool = joined.find((e) => e.kind === "EventCardPool") as any;
+  assert.ok(joinPool);
+  assert.equal(joinPool.eventId, "Sealed_FRA_20260929");
+  assert.deepEqual(joinPool.cardPool, [11, 11, 12, 13]);
+  assert.ok(joined.some((e) => e.kind === "RewardGrant"), "the join response's inventory ledger is still captured too");
+  // ...and the join REQUEST still only produces DraftJoined, no course data.
+  const joinRequest = new Classifier().classify({
+    direction: "request",
+    method: "EventJoin",
+    ts: "2026-10-02T10:50:09Z",
+    json: { request: JSON.stringify({ EventName: "Sealed_FRA_20260929", EntryCurrencyType: "Gem", EntryCurrencyPaid: 2000 }) },
+  });
+  assert.deepEqual(joinRequest.map((e) => e.kind), ["DraftJoined"]);
+
+  console.log("OK: classifier handled draft pack/pick/complete, match found/completed, game-state noise filtering, Bot Draft's combined pick+next-pack response, deck submission's real sideboard/format capture, EventGetCoursesV2 standings (and EventJoin's response, which carries the same course + a Sealed's freshly granted pool) plus the generic EventCardPool capture from a course's CardPool, a synthetic 'Pick Two' (2 cards per pick) extension of both draft paths, EventClaimPrize's real captured reward shape (including its own CardPool capture, a RewardGrant emitted alongside it, and rejecting a SourceId that doesn't match the course for EventReward while RewardGrant still captures it), RewardGrant's other three confirmed real sources (Mastery Pass tier reward via GraphProcessV2, plus Sealed's card-pool grant and entry-fee cost via EventJoin), and (milestone 23) GameHandResolved/CardPlayedInGame from a real-traced mulligan/bottom/play sequence, including a second game of the same match resetting tracking independently.");
 }
 
 run();

@@ -392,8 +392,35 @@ function run() {
     ],
   });
 
+  // A deck saved before any match (a Sealed deck just built) must make the
+  // overlay's current event that run immediately, not only once its first
+  // match is found - and a later deck for a DIFFERENT event after an earlier
+  // run's matches must take over from that run, while a match in progress
+  // is never displaced.
+  const early = new LiveStateTracker();
+  early.record({ kind: "PlayerIdentified", screenName: "Me", clientId: "c-early", ts: "2026-10-02T10:00:00Z" });
+  assert.equal(early.snapshot().eventRecord, null);
+  early.record({ kind: "DeckSubmitted", eventName: "Sealed_X", deckId: "ds1", deckName: "Sealed Deck", mainDeck: [], sideboard: [], format: "Draft", ts: "2026-10-02T10:05:00Z" });
+  const earlySnap = early.snapshot();
+  assert.equal(earlySnap.eventRecord?.eventId, "Sealed_X");
+  assert.equal(earlySnap.eventRecord?.deckName, "Sealed Deck");
+  assert.equal(earlySnap.eventRecord?.total, 0);
+  early.record({
+    kind: "MatchFound",
+    matchId: "early-m1",
+    eventId: "Constructed_Y",
+    players: [
+      { userId: "u1", playerName: "Me", systemSeatId: 1, teamId: 1, courseId: null },
+      { userId: "u2", playerName: "Opp", systemSeatId: 2, teamId: 2, courseId: null },
+    ],
+    ts: "2026-10-02T10:10:00Z",
+  });
+  assert.equal(early.snapshot().eventRecord?.eventId, "Constructed_Y", "a match found after the deck wins - the deck is older");
+  early.record({ kind: "DeckSubmitted", eventName: "Sealed_Z", deckId: "ds2", deckName: "New Sealed", mainDeck: [], sideboard: [], format: "Draft", ts: "2026-10-02T11:00:00Z" });
+  assert.equal(early.snapshot().eventRecord?.eventId, "Sealed_Z", "a deck saved after the last match takes over as the current event");
+
   console.log(
-    "OK: LiveStateTracker handled match found/game-state/completed, accumulating win rate per event without cross-contamination, reconciled with Arena's own CourseStanding in both directions, seeded correct history at startup without faking a live match, tracked/resumed live draft progress correctly, carries every card from a multi-card 'Pick Two' pick, and (milestone 18) surfaces the live game number and a completed match's own per-game Bo3 score.",
+    "OK: LiveStateTracker handled match found/game-state/completed, a deck saved before/after matches setting the current event, accumulating win rate per event without cross-contamination, reconciled with Arena's own CourseStanding in both directions, seeded correct history at startup without faking a live match, tracked/resumed live draft progress correctly, carries every card from a multi-card 'Pick Two' pick, and (milestone 18) surfaces the live game number and a completed match's own per-game Bo3 score.",
   );
 }
 

@@ -377,7 +377,23 @@ export class LiveStateTracker {
     }
 
     let eventRecord: OverlaySnapshot["eventRecord"] = null;
-    const eventId = match?.eventId ?? outcomes.at(-1)?.eventId ?? null;
+    let eventId = match?.eventId ?? outcomes.at(-1)?.eventId ?? null;
+    // A deck saved AFTER the most recent match (or with no match at all
+    // yet) means a newer run has started - e.g. a Sealed deck just built,
+    // before its first match. Without this the overlay (and everything
+    // keyed off its current event) only learned about a run once its first
+    // match was found. A match in progress is never overridden: a deck
+    // can't be submitted mid-match, so its ts is always older than that
+    // match's own MatchFound.
+    const latestDeck = this.deckSubmissions.reduce<DeckSubmitted | null>(
+      (best, d) => (best === null || compareTs(d.ts, best.ts) >= 0 ? d : best),
+      null,
+    );
+    const latestMatch = this.matchFounds.reduce<MatchFound | null>(
+      (best, m) => (best === null || compareTs(m.ts, best.ts) >= 0 ? m : best),
+      null,
+    );
+    if (latestDeck && (!latestMatch || compareTs(latestDeck.ts, latestMatch.ts) > 0)) eventId = latestDeck.eventName;
     if (eventId) {
       // Milestone 19: resolve which course is CURRENT for this eventId
       // before computing anything else - see courseRuns.ts and this

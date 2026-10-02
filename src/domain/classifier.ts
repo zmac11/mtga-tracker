@@ -111,6 +111,7 @@ export class Classifier {
     this.classifyDraftComplete(ev, json, out);
     this.classifyDeckSubmitted(ev, json, out);
     this.classifyCourseStandings(ev, json, out);
+    this.classifyEventJoinCourse(ev, json, out);
     this.classifyEventClaimPrize(ev, json, out);
     this.classifyRewardGrants(ev, json, out);
     this.classifyMatchRoomState(ev, json, out);
@@ -356,36 +357,55 @@ export class Classifier {
     if (ev.method !== "EventGetCoursesV2" || ev.direction !== "response") return;
     if (!Array.isArray(json.Courses)) return;
 
-    for (const course of json.Courses) {
-      if (!isObj(course)) continue;
-      if (typeof course.InternalEventName !== "string" || typeof course.CourseId !== "string") continue;
-      const deckSummary = course.CourseDeckSummary;
+    for (const course of json.Courses) this.emitCourse(course, ev.ts, out);
+  }
+
+  /**
+   * EventJoin response - confirmed real (2026-10-02, Sealed_FRA_20260929):
+   * carries the same Course object an EventGetCoursesV2 listing does,
+   * including the whole freshly-granted Sealed pool (CardPool, 84 cards)
+   * and CurrentModule "DeckSelect". Previously only the REQUEST was
+   * classified (DraftJoined), so the pool and the course itself weren't
+   * recorded until some later course listing happened to include them
+   * (in practice: right after the deck was saved) - meaning anything that
+   * went wrong between opening the boosters and saving the deck lost the
+   * pool entirely, and the run didn't exist as a course until then. Same
+   * shared emission as the course listing, so the output is identical.
+   */
+  private classifyEventJoinCourse(ev: ClassifiableEvent, json: Record<string, unknown>, out: DomainEvent[]) {
+    if (ev.method !== "EventJoin" || ev.direction !== "response") return;
+    this.emitCourse(json.Course, ev.ts, out);
+  }
+
+  private emitCourse(course: unknown, ts: string, out: DomainEvent[]) {
+    if (!isObj(course)) return;
+    if (typeof course.InternalEventName !== "string" || typeof course.CourseId !== "string") return;
+    const deckSummary = course.CourseDeckSummary;
+    out.push({
+      kind: "CourseStanding",
+      eventId: course.InternalEventName,
+      courseId: course.CourseId,
+      wins: Number(course.CurrentWins ?? 0),
+      losses: Number(course.CurrentLosses ?? 0),
+      currentModule: typeof course.CurrentModule === "string" ? course.CurrentModule : null,
+      deckName: isObj(deckSummary) && typeof deckSummary.Name === "string" ? deckSummary.Name : null,
+      ts,
+    });
+
+    // Milestone 18: same generic Course.CardPool field DraftCompleted
+    // has always read (see EventCardPool's doc comment in types.ts) -
+    // captured here too so a format that never fires DraftCompleteDraft
+    // (chiefly Sealed) still gets its pool recorded, via whichever
+    // course listing happens to include it. Skipped when empty/absent -
+    // most courses (anything non-limited) won't have one at all.
+    if (Array.isArray(course.CardPool) && course.CardPool.length > 0) {
       out.push({
-        kind: "CourseStanding",
+        kind: "EventCardPool",
         eventId: course.InternalEventName,
         courseId: course.CourseId,
-        wins: Number(course.CurrentWins ?? 0),
-        losses: Number(course.CurrentLosses ?? 0),
-        currentModule: typeof course.CurrentModule === "string" ? course.CurrentModule : null,
-        deckName: isObj(deckSummary) && typeof deckSummary.Name === "string" ? deckSummary.Name : null,
-        ts: ev.ts,
+        cardPool: course.CardPool.map(Number),
+        ts,
       });
-
-      // Milestone 18: same generic Course.CardPool field DraftCompleted
-      // has always read (see EventCardPool's doc comment in types.ts) -
-      // captured here too so a format that never fires DraftCompleteDraft
-      // (chiefly Sealed) still gets its pool recorded, via whichever
-      // course listing happens to include it. Skipped when empty/absent -
-      // most courses (anything non-limited) won't have one at all.
-      if (Array.isArray(course.CardPool) && course.CardPool.length > 0) {
-        out.push({
-          kind: "EventCardPool",
-          eventId: course.InternalEventName,
-          courseId: course.CourseId,
-          cardPool: course.CardPool.map(Number),
-          ts: ev.ts,
-        });
-      }
     }
   }
 
