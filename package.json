@@ -1,6 +1,6 @@
 {
   "name": "mtga-tracker",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "private": true,
   "description": "Background companion app for MTG Arena: reads Player.log to capture match, draft and deck data, with a live overlay.",
   "repository": {
