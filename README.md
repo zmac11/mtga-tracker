@@ -125,6 +125,14 @@ Click the overlay's current-event label (once you're in a match or draft)
 to open its **deck viewer** in your browser; a running draft also gets a
 **draft progress** page that keeps itself up to date while you're picking.
 
+The deck viewer's **Share this deck** link opens a single self-contained page
+anyone can open without the tracker. A bar at the top of it downloads the deck
+to send to someone: the page itself as an `.html` file, an Arena-importable
+`.txt` decklist, a `.csv` spreadsheet, a `.md` text version (for Discord,
+Reddit, GitHub...), or `.json`; **Print / PDF** opens the print dialog to save
+a PDF. The Limited Stats page's "Export filtered decks" file has the same bar,
+covering all the decks in it.
+
 During a game the overlay grows a second panel with your **whole decklist**:
 for every card, how many copies are still in your library and the chance
 the next card you draw is that one. It follows Arena's own library: cards

@@ -96,10 +96,56 @@ export interface ShareDeckData {
   appVersion?: string;
 }
 
+/**
+ * The machine-readable copy of one deck embedded in every share section, so the page's
+ * download bar (see buildShareShellParts) can offer the deck as a file in other formats
+ * (.txt / .csv / .md / .json) without any server round-trip - the page stays a plain static
+ * file that works the same when it's been emailed or hosted. A combined multi-deck page has
+ * one of these per section; the download bar merges them. `</` is escaped so a card name can
+ * never close the script tag.
+ */
+export interface ShareDeckPayload {
+  title: string;
+  subtitle: string;
+  colors: string;
+  record: string;
+  winRate: string | null;
+  main: SharePayloadCard[];
+  sideboard: SharePayloadCard[];
+  arenaImport: string;
+}
+export interface SharePayloadCard {
+  quantity: number;
+  name: string;
+  types: string;
+  manaCost: string;
+}
+
+export function buildSharePayload(data: ShareDeckData): ShareDeckPayload {
+  const toCard = (c: ViewerCard): SharePayloadCard => ({ quantity: c.quantity, name: c.name, types: c.types.join(" "), manaCost: c.manaCost ?? "" });
+  const { wins, losses, total, pct } = data.winRate;
+  return {
+    title: data.deckName ?? data.definitionLabel,
+    subtitle: `[${data.format}] ${data.definitionLabel} - ${data.eventId}${data.runLabel ? ` - ${data.runLabel}` : ""}`,
+    colors: data.colorCombo + ((data.splashColors ?? []).length > 0 ? ` (splash: ${(data.splashColors ?? []).join("")})` : ""),
+    record: `${wins}-${losses}`,
+    winRate: total > 0 ? pct : null,
+    main: data.mainDeck.map(toCard),
+    sideboard: (data.sideboard ?? []).map(toCard),
+    arenaImport: data.arenaImportText,
+  };
+}
+
+function deckDataScript(data: ShareDeckData): string {
+  const json = JSON.stringify(buildSharePayload(data)).replace(/</g, "\\u003c");
+  return `<script type="application/json" class="deck-data">${json}</script>`;
+}
+
 /** One deck's worth of shareable content - header, Visual-tab card grid, optional sideboard list, and the Arena-import box - with no outer page wrapper. See this file's header for why this is split out from generateDeckShareHtml. The copy button inside the import box is wired up via a class (not an id - a combined multi-deck page has many of these on one page) and copyImportText (see buildShareShellParts's tail) resolves its own textarea via `.closest(".import-box")` rather than a fixed id. */
 export function renderShareSectionHtml(data: ShareDeckData): string {
   const sideboard = data.sideboard ?? [];
   return `<section class="shared-deck">
+  ${deckDataScript(data)}
   ${renderDeckHeaderHtml(data)}
   ${visualHtml(data.mainDeck)}
   ${sideboard.length > 0 ? `<div class="deck-columns">${deckListHtml("Sideboard", sideboard)}</div>` : ""}
@@ -153,11 +199,30 @@ ${FAVICON_LINK_TAG}
   .import-box textarea { width: 100%; min-height: 180px; box-sizing: border-box; background: var(--input-bg, #0f1014); color: var(--text-2, #cfd2dc); border: 1px solid var(--border-2, #34364280); border-radius: 6px; padding: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82rem; resize: vertical; }
   .copy-btn { background: var(--accent-solid, #3d4ee0); color: #fff; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 0.9rem; margin-top: 10px; }
   .copy-btn.copied { background: #4fae6a; }
+  .download-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 20px; padding: 10px 12px; background: var(--surface-3, #1b1c23); border: 1px solid var(--border, #2a2c36); border-radius: 8px; }
+  .download-bar .label { color: var(--muted, #8a8d99); font-size: 0.85rem; margin-right: 4px; }
+  .download-bar button { background: var(--surface-2, #22232c); color: var(--text-2, #cfd2dc); border: 1px solid var(--border-2, #343642); padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-family: inherit; }
+  .download-bar button:hover { background: var(--accent-solid, #3d4ee0); color: #fff; border-color: transparent; }
+  .download-bar button.done { background: #4fae6a; color: #fff; border-color: transparent; }
+  @media print {
+    :root:root:root { --bg: #fff; --surface: #fff; --surface-2: #f2f2f2; --surface-3: #f7f7f7; --input-bg: #fff; --text: #111; --text-2: #222; --text-3: #333; --muted: #555; --muted-2: #555; --muted-3: #666; --border: #ccc; --border-2: #bbb; --cs: light; }
+    .download-bar, .import-box .copy-btn { display: none; }
+    body { padding: 0; }
+  }
   .app-version-footer { margin-top: 28px; padding-top: 12px; border-top: 1px solid var(--border, #2a2c36); color: var(--muted-3, #6a6d79); font-size: 0.75rem; }
   .app-version-footer a { color: var(--muted-3, #6a6d79); }
 </style>
 </head>
 <body>
+<div class="download-bar" id="download-bar">
+  <span class="label">Download or share:</span>
+  <button type="button" onclick="downloadDecks('html', this)" title="This whole page as one HTML file - open it in any browser">Web page (.html)</button>
+  <button type="button" onclick="downloadDecks('txt', this)" title="Plain text you can paste into Arena's deck builder">Arena decklist (.txt)</button>
+  <button type="button" onclick="downloadDecks('csv', this)" title="One row per card - opens in Excel, Numbers or Google Sheets">Spreadsheet (.csv)</button>
+  <button type="button" onclick="downloadDecks('md', this)" title="Markdown text for Discord, Reddit, GitHub...">Markdown (.md)</button>
+  <button type="button" onclick="downloadDecks('json', this)" title="Structured data">JSON (.json)</button>
+  <button type="button" onclick="window.print()" title="Opens the print dialog - choose 'Save as PDF'">Print / PDF</button>
+</div>
 `;
 
   const tail = `
@@ -165,6 +230,80 @@ ${FAVICON_LINK_TAG}
     ${CARD_PREVIEW_JS}
     ${VISUAL_TAB_JS}
     initVisualHover();
+    function collectDecks() {
+      return Array.prototype.map.call(document.querySelectorAll('script.deck-data'), function (el) { return JSON.parse(el.textContent); });
+    }
+    function slugify(text) {
+      var slug = String(text).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+      return slug || 'deck';
+    }
+    function saveTextFile(fileName, mimeType, text) {
+      var blob = new Blob([text], { type: mimeType + ';charset=utf-8' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 0);
+    }
+    function csvCell(value) {
+      var text = String(value);
+      return /[",\\r\\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
+    }
+    function buildDeckFile(kind, decks) {
+      var i, j, d, lines;
+      if (kind === 'txt') {
+        if (decks.length === 1) return decks[0].arenaImport + '\\n';
+        return decks.map(function (deck) { return '=== ' + deck.title + ' ===\\n' + deck.arenaImport; }).join('\\n\\n') + '\\n';
+      }
+      if (kind === 'json') return JSON.stringify(decks.length === 1 ? decks[0] : decks, null, 2) + '\\n';
+      if (kind === 'csv') {
+        lines = ['Deck,Section,Quantity,Name,Type,Mana cost'];
+        for (i = 0; i < decks.length; i++) {
+          d = decks[i];
+          [['Maindeck', d.main], ['Sideboard', d.sideboard]].forEach(function (part) {
+            for (j = 0; j < part[1].length; j++) {
+              var c = part[1][j];
+              lines.push([d.title, part[0], c.quantity, c.name, c.types, c.manaCost].map(csvCell).join(','));
+            }
+          });
+        }
+        return '\\uFEFF' + lines.join('\\r\\n') + '\\r\\n';
+      }
+      if (kind === 'md') {
+        lines = [];
+        decks.forEach(function (deck) {
+          lines.push('# ' + deck.title, '', deck.subtitle, '', 'Colors: ' + deck.colors + ' | Record: ' + deck.record + (deck.winRate ? ' (' + deck.winRate + ')' : ''), '');
+          [['Maindeck', deck.main], ['Sideboard', deck.sideboard]].forEach(function (part) {
+            if (part[1].length === 0) return;
+            var count = part[1].reduce(function (sum, c) { return sum + c.quantity; }, 0);
+            lines.push('## ' + part[0] + ' (' + count + ' cards)', '');
+            part[1].forEach(function (c) { lines.push('- ' + c.quantity + 'x ' + c.name); });
+            lines.push('');
+          });
+        });
+        return lines.join('\\n');
+      }
+      return '';
+    }
+    function downloadDecks(kind, btn) {
+      var decks = collectDecks();
+      if (decks.length === 0) return;
+      var base = decks.length === 1 ? slugify(decks[0].title) : 'mtga-shared-decks';
+      if (kind === 'html') {
+        saveTextFile(base + '.html', 'text/html', '<!DOCTYPE html>\\n' + document.documentElement.outerHTML);
+      } else {
+        var types = { txt: 'text/plain', csv: 'text/csv', md: 'text/markdown', json: 'application/json' };
+        saveTextFile(base + '.' + kind, types[kind], buildDeckFile(kind, decks));
+      }
+      if (btn) {
+        var original = btn.textContent;
+        btn.textContent = 'Saved!';
+        btn.classList.add('done');
+        setTimeout(function () { btn.textContent = original; btn.classList.remove('done'); }, 1500);
+      }
+    }
     function copyImportText(btn) {
       var box = btn.closest('.import-box');
       var ta = box.querySelector('.arena-import');

@@ -98,6 +98,24 @@ function run() {
   assert.equal((combined.match(/<style>/g) ?? []).length, 1);
   assert.ok(!combined.includes('id="arena-import"'));
 
+  // Download bar: one bar in the shared head, one embedded JSON payload per deck section,
+  // and a card name can never break out of the payload's <script> tag.
+  assert.ok(html.includes('id="download-bar"'));
+  for (const kind of ["html", "txt", "csv", "md", "json"]) assert.ok(html.includes(`downloadDecks('${kind}', this)`), kind);
+  assert.ok(html.includes("window.print()"));
+  assert.equal(html.split('class="download-bar"').length - 1, 1);
+  assert.equal(combined.split('class="download-bar"').length - 1, 1);
+  const payloads = [...combined.matchAll(/<script type="application\/json" class="deck-data">(.*?)<\/script>/g)].map((m) => JSON.parse(m[1]!));
+  assert.equal(payloads.length, 2);
+  assert.equal(payloads[0].title, "Draft Deck");
+  assert.equal(payloads[0].record, "4-2");
+  assert.equal(payloads[0].main[0].name, "Bothersome Noisemaker");
+  assert.equal(payloads[0].main[0].types, "Creature");
+  assert.equal(payloads[0].arenaImport, data.arenaImportText);
+  assert.equal(payloads[1].title, "Second Deck");
+  const evil = renderShareSectionHtml({ ...data, deckName: "</script><b>x", mainDeck: [card({ cardId: 9, name: "A</script>B", types: ["Land"] })] });
+  assert.equal(evil.split("</script>").length - 1, 1, "only the payload's own closing tag may appear");
+
   console.log("OK: generateDeckShareHtml reuses deckViewerHtml.ts's header and Visual-tab card grid verbatim, renders a tab-free single-page layout, shows the Sideboard list only when one was actually captured, embeds the pre-built Arena-import text with a copy button, shows the app-version footer only when passed, and (via renderShareSectionHtml + buildShareShellParts) composes into one valid combined page for a multi-deck export with exactly one shared copy of the CSS/JS.");
 }
 
