@@ -81,6 +81,16 @@ function renderThemeOptions(themes, currentTheme) {
   );
 }
 
+function renderPageThemeOptions(themes, currentTheme) {
+  renderRadioOptions(
+    document.getElementById("page-theme-options"),
+    themes,
+    currentTheme,
+    (key) => window.settingsApi.setPageTheme(key),
+    "Could not change the page theme.",
+  );
+}
+
 function renderCardSizeOptions(presets, currentPreset) {
   renderRadioOptions(
     cardSizeOptionsEl,
@@ -302,6 +312,7 @@ async function init() {
   const settings = await window.settingsApi.getSettings();
   renderSizeOptions(settings.presets, settings.sizePreset);
   renderThemeOptions(settings.themes, settings.theme);
+  renderPageThemeOptions(settings.pageThemes, settings.pageTheme);
   renderCardSizeOptions(settings.cardSizePresets, settings.cardSizePreset);
   setOpacitySlider(settings.opacity);
   autoUpdateCheckbox.checked = settings.autoCheckForUpdates !== false;

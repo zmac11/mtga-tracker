@@ -25,27 +25,27 @@ export function generateOpponentHtml(rows: OpponentMatchRow[]): string {
 <title>Opponent History - MTGA Tracker</title>
 ${FAVICON_LINK_TAG}
 <style>
-  :root { color-scheme: dark; }
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #14151a; color: #e8e8ec; margin: 0; padding: 24px; }
+  :root { color-scheme: var(--cs, dark); }
+  body { font-family: var(--font, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); background: var(--bg, #14151a); color: var(--text, #e8e8ec); margin: 0; padding: 24px; }
   h1 { font-size: 1.4rem; margin: 0 0 4px; }
   h2 { font-size: 1.1rem; margin: 28px 0 10px; }
-  .muted { color: #8a8d99; }
+  .muted { color: var(--muted, #8a8d99); }
   p.hint { margin: 0 0 20px; }
-  .filters { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; background: #1c1e26; border: 1px solid #2a2c36; border-radius: 8px; padding: 14px 16px; margin-bottom: 16px; }
+  .filters { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; background: var(--surface, #1c1e26); border: 1px solid var(--border, #2a2c36); border-radius: 8px; padding: 14px 16px; margin-bottom: 16px; }
   .filter-group { display: flex; flex-direction: column; gap: 6px; }
-  .filter-group label.group-label { font-size: 0.75rem; color: #8a8d99; text-transform: uppercase; letter-spacing: 0.03em; }
-  input[type="text"], select { background: #14151a; color: #e8e8ec; border: 1px solid #2a2c36; border-radius: 6px; padding: 6px 8px; font-size: 0.9rem; min-width: 180px; }
+  .filter-group label.group-label { font-size: 0.75rem; color: var(--muted, #8a8d99); text-transform: uppercase; letter-spacing: 0.03em; }
+  input[type="text"], select { background: var(--bg, #14151a); color: var(--text, #e8e8ec); border: 1px solid var(--border, #2a2c36); border-radius: 6px; padding: 6px 8px; font-size: 0.9rem; min-width: 180px; }
   table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
-  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid #22242e; }
-  th { color: #8a8d99; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.02em; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border-faint, #22242e); }
+  th { color: var(--muted, #8a8d99); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.02em; }
   tbody tr { cursor: pointer; }
-  tbody tr:hover { background: #1c1e26; }
-  tbody tr.selected { background: #21243a; }
-  .record-win { color: #7ee787; }
-  .record-loss { color: #ff8080; }
-  .in-progress { color: #8a8d99; font-style: italic; }
+  tbody tr:hover { background: var(--surface, #1c1e26); }
+  tbody tr.selected { background: var(--accent-bg-2, #21243a); }
+  .record-win { color: var(--pos, #7ee787); }
+  .record-loss { color: var(--neg, #ff8080); }
+  .in-progress { color: var(--muted, #8a8d99); font-style: italic; }
   .empty-note { padding: 20px 0; }
-  #detail-panel { background: #1c1e26; border: 1px solid #2a2c36; border-radius: 8px; padding: 14px 16px; margin-top: 8px; }
+  #detail-panel { background: var(--surface, #1c1e26); border: 1px solid var(--border, #2a2c36); border-radius: 8px; padding: 14px 16px; margin-top: 8px; }
   #detail-panel h3 { margin: 0 0 10px; font-size: 1rem; }
 </style>
 </head>

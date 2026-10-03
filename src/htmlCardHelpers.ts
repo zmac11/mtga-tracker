@@ -91,7 +91,7 @@ export const CARD_PREVIEW_CSS = `
   .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
   .dot-W { background: #f8f6d8; } .dot-U { background: #4fa8e0; } .dot-B { background: #6b6b76; }
   .dot-R { background: #e05a4f; } .dot-G { background: #4fae6a; } .dot-C { background: #55586b; }
-  .preview { display: none; position: absolute; left: 100%; top: 0; z-index: 10; margin-left: 12px; background: #1c1d24; border: 1px solid #3a3c48; border-radius: 8px; padding: 8px; width: 260px; max-height: calc(100vh - 24px); overflow-y: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
+  .preview { display: none; position: absolute; left: 100%; top: 0; z-index: 10; margin-left: 12px; background: var(--popover, #1c1d24); border: 1px solid var(--border-3, #3a3c48); border-radius: 8px; padding: 8px; width: 260px; max-height: calc(100vh - 24px); overflow-y: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
   /* Milestone 16: collision-aware flip classes - see CARD_PREVIEW_JS. .flip-up
      opens the panel upward (its bottom edge anchored to the trigger's top)
      instead of downward, when there isn't room below. .flip-left opens it to
@@ -104,7 +104,7 @@ export const CARD_PREVIEW_CSS = `
   .preview-text { position: relative; font-size: 0.85rem; line-height: 1.4; }
   /* Milestone 15: shared "xN" quantity badge - see this file's header comment for every place it's reused (a hover preview's art here, plus the Visual tab's always-visible thumbnail badge in deckViewerHtml.ts, which pulls in this stylesheet). Positioned in the upper-right corner of whatever it's placed in, just below where a real card's mana-cost symbols print - the one spot that's never covered by a fanned/overlapping stack's next card (see deckViewerHtml.ts's Milestone 15 comment for why that mattered). */
   .qty-badge { position: absolute; top: 15%; right: 6px; background: rgba(0,0,0,0.78); color: #fff; font-size: 0.7rem; font-weight: 600; padding: 1px 5px; border-radius: 4px; z-index: 2; line-height: 1.3; }
-  code { background: #22232c; padding: 1px 5px; border-radius: 4px; }
+  code { background: var(--surface-2, #22232c); padding: 1px 5px; border-radius: 4px; }
 `;
 
 /**

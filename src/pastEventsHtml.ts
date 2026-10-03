@@ -94,22 +94,22 @@ export function generatePastEventsHtml(rows: PastEventRow[]): string {
 <title>Past Events - MTGA Tracker</title>
 ${FAVICON_LINK_TAG}
 <style>
-  :root { color-scheme: dark; }
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #14151a; color: #e8e8ec; margin: 0; padding: 24px; }
+  :root { color-scheme: var(--cs, dark); }
+  body { font-family: var(--font, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); background: var(--bg, #14151a); color: var(--text, #e8e8ec); margin: 0; padding: 24px; }
   h1 { font-size: 1.4rem; margin: 0 0 4px; }
-  .muted { color: #8a8d99; }
+  .muted { color: var(--muted, #8a8d99); }
   p.hint { margin: 0 0 20px; }
   ul.run-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-  li.run-row { background: #1c1e26; border: 1px solid #2a2c36; border-radius: 8px; padding: 10px 14px; }
-  li.run-row a { display: flex; justify-content: space-between; align-items: baseline; text-decoration: none; color: #e8e8ec; gap: 12px; }
+  li.run-row { background: var(--surface, #1c1e26); border: 1px solid var(--border, #2a2c36); border-radius: 8px; padding: 10px 14px; }
+  li.run-row a { display: flex; justify-content: space-between; align-items: baseline; text-decoration: none; color: var(--text, #e8e8ec); gap: 12px; }
   li.run-row a:hover .event-name { text-decoration: underline; }
   .event-name { font-weight: 600; }
-  .badge { font-weight: 400; font-size: 0.75rem; color: #9fa6ff; background: #262a4a; border-radius: 4px; padding: 1px 6px; margin-left: 6px; }
+  .badge { font-weight: 400; font-size: 0.75rem; color: var(--accent, #9fa6ff); background: var(--accent-bg, #262a4a); border-radius: 4px; padding: 1px 6px; margin-left: 6px; }
   h2 { font-size: 1.05rem; margin: 22px 0 8px; }
   .status { font-weight: 400; font-size: 0.75rem; border-radius: 4px; padding: 1px 6px; margin-left: 6px; }
-  .status-done { color: #8fd9a8; background: #1e3a2a; }
-  .status-live { color: #f0c674; background: #3d3320; }
-  .sub { display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px; font-size: 0.85rem; color: #cfd2dc; gap: 12px; }
+  .status-done { color: var(--ok-text, #8fd9a8); background: var(--ok-bg, #1e3a2a); }
+  .status-live { color: var(--warn-text, #f0c674); background: var(--warn-bg, #3d3320); }
+  .sub { display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px; font-size: 0.85rem; color: var(--text-2, #cfd2dc); gap: 12px; }
 </style>
 </head>
 <body>

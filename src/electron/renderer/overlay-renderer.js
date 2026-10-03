@@ -125,6 +125,10 @@ function applySettings({ fontSizePx, opacity, theme }) {
   // 2026-10-02: overlay.css restyles everything off body[data-theme].
   if (typeof theme === "string") {
     document.body.dataset.theme = theme;
+    // 2026-10-03: "default" and "blue" are styled directly; every other theme
+    // is built on the --th-* variables in overlay.css's "Themed looks" block,
+    // which that block only applies under body.themed.
+    document.body.classList.toggle("themed", theme !== "default" && theme !== "blue");
   }
   if (typeof fontSizePx === "number") {
     document.documentElement.style.fontSize = `${fontSizePx}px`;

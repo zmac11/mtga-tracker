@@ -173,9 +173,9 @@ export function generateNoDraftInProgressHtml(): string {
 <title>No draft in progress - MTGA Tracker</title>
 ${FAVICON_LINK_TAG}
 <style>
-  :root { color-scheme: dark; }
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #14151a; color: #e8e8ec; margin: 0; padding: 24px; }
-  .muted { color: #8a8d99; }
+  :root { color-scheme: var(--cs, dark); }
+  body { font-family: var(--font, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); background: var(--bg, #14151a); color: var(--text, #e8e8ec); margin: 0; padding: 24px; }
+  .muted { color: var(--muted, #8a8d99); }
 </style>
 </head>
 <body>
@@ -206,26 +206,26 @@ export function generateDraftProgressHtml(data: DraftProgressData): string {
 <title>Draft in progress - MTGA Tracker</title>
 ${FAVICON_LINK_TAG}
 <style>
-  :root { color-scheme: dark; }
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #14151a; color: #e8e8ec; margin: 0; padding: 24px; }
+  :root { color-scheme: var(--cs, dark); }
+  body { font-family: var(--font, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); background: var(--bg, #14151a); color: var(--text, #e8e8ec); margin: 0; padding: 24px; }
   h1 { font-size: 1.4rem; margin: 0 0 4px; }
-  h2 { font-size: 1rem; margin: 0 0 8px; color: #cfd2dc; }
-  .muted { color: #8a8d99; font-weight: normal; font-size: 0.85em; }
-  .header { margin-bottom: 20px; border-bottom: 1px solid #2a2c36; padding-bottom: 12px; }
-  .header .meta { color: #b7bac6; font-size: 0.95rem; }
+  h2 { font-size: 1rem; margin: 0 0 8px; color: var(--text-2, #cfd2dc); }
+  .muted { color: var(--muted, #8a8d99); font-weight: normal; font-size: 0.85em; }
+  .header { margin-bottom: 20px; border-bottom: 1px solid var(--border, #2a2c36); padding-bottom: 12px; }
+  .header .meta { color: var(--text-3, #b7bac6); font-size: 0.95rem; }
   .columns { display: flex; gap: 32px; flex-wrap: wrap; }
   .column { flex: 1 1 320px; min-width: 280px; }
   .card-list, .pick-list { list-style: none; margin: 0; padding: 0; }
   .card-row, .pick-row { position: relative; display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 4px; cursor: default; }
-  .card-row:hover, .card-row:focus, .pick-row:hover, .pick-row:focus { background: #22232c; outline: none; }
+  .card-row:hover, .card-row:focus, .pick-row:hover, .pick-row:focus { background: var(--surface-2, #22232c); outline: none; }
   .card-row:hover .preview, .card-row:focus .preview, .pick-row:hover .preview, .pick-row:focus .preview { display: block; }
-  .pick-num { color: #8a8d99; width: 3.2em; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+  .pick-num { color: var(--muted, #8a8d99); width: 3.2em; flex-shrink: 0; font-variant-numeric: tabular-nums; }
   .name { flex: 1; }
   .pack-group-list { list-style: none; margin: 0; padding: 0; }
   .pack-group { margin-bottom: 14px; }
-  .pack-group-label { color: #8a8d99; font-size: 0.85em; margin-bottom: 2px; }
+  .pack-group-label { color: var(--muted, #8a8d99); font-size: 0.85em; margin-bottom: 2px; }
   .card-row.picked { background: rgba(111, 213, 122, 0.1); }
-  .picked-badge { color: #6fd57a; flex-shrink: 0; }
+  .picked-badge { color: var(--pos, #6fd57a); flex-shrink: 0; }
   ${CARD_PREVIEW_CSS}
 </style>
 </head>

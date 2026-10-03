@@ -127,34 +127,34 @@ export function buildShareShellParts(title: string, cardImageWidthPx: number = D
 <title>${escapeHtml(title)}</title>
 ${FAVICON_LINK_TAG}
 <style>
-  :root { color-scheme: dark; --card-img-width: ${cardImageWidthPx}px; --card-overlap: calc(var(--card-img-width) * -1.05); }
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #14151a; color: #e8e8ec; margin: 0; padding: 24px; max-width: 1240px; }
+  :root { color-scheme: var(--cs, dark); --card-img-width: ${cardImageWidthPx}px; --card-overlap: calc(var(--card-img-width) * -1.05); }
+  body { font-family: var(--font, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); background: var(--bg, #14151a); color: var(--text, #e8e8ec); margin: 0; padding: 24px; max-width: 1240px; }
   h1 { font-size: 1.4rem; margin: 0 0 4px; }
-  h2 { font-size: 1rem; margin: 28px 0 8px; color: #cfd2dc; }
-  .muted { color: #8a8d99; font-weight: normal; font-size: 0.85em; }
-  .header { margin-bottom: 20px; border-bottom: 1px solid #2a2c36; padding-bottom: 12px; }
-  .header .meta { color: #b7bac6; font-size: 0.95rem; }
-  .shared-deck { margin-bottom: 36px; padding-bottom: 28px; border-bottom: 1px solid #2a2c36; }
+  h2 { font-size: 1rem; margin: 28px 0 8px; color: var(--text-2, #cfd2dc); }
+  .muted { color: var(--muted, #8a8d99); font-weight: normal; font-size: 0.85em; }
+  .header { margin-bottom: 20px; border-bottom: 1px solid var(--border, #2a2c36); padding-bottom: 12px; }
+  .header .meta { color: var(--text-3, #b7bac6); font-size: 0.95rem; }
+  .shared-deck { margin-bottom: 36px; padding-bottom: 28px; border-bottom: 1px solid var(--border, #2a2c36); }
   .shared-deck:last-of-type { border-bottom: none; }
   .deck-columns { display: flex; gap: 32px; flex-wrap: wrap; }
   .deck-column { flex: 1 1 320px; min-width: 280px; }
   .deck-type-group { margin-bottom: 14px; }
   .deck-type-group:last-child { margin-bottom: 0; }
-  .deck-type-group h3 { font-size: 0.78rem; margin: 0 0 4px; color: #9296a3; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
+  .deck-type-group h3 { font-size: 0.78rem; margin: 0 0 4px; color: var(--muted-2, #9296a3); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
   .card-list { list-style: none; margin: 0; padding: 0; }
   .card-row { position: relative; display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 4px; cursor: default; }
-  .card-row:hover, .card-row:focus { background: #22232c; outline: none; }
+  .card-row:hover, .card-row:focus { background: var(--surface-2, #22232c); outline: none; }
   .card-row:hover .preview, .card-row:focus .preview { display: block; }
-  .qty { color: #8a8d99; width: 2.2em; text-align: right; flex-shrink: 0; }
+  .qty { color: var(--muted, #8a8d99); width: 2.2em; text-align: right; flex-shrink: 0; }
   .name { flex: 1; }
   ${CARD_PREVIEW_CSS}
   ${VISUAL_TAB_CSS}
-  .import-box { background: #1b1c23; border: 1px solid #2a2c36; border-radius: 8px; padding: 16px; margin-top: 8px; }
-  .import-box textarea { width: 100%; min-height: 180px; box-sizing: border-box; background: #0f1014; color: #cfd2dc; border: 1px solid #34364280; border-radius: 6px; padding: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82rem; resize: vertical; }
-  .copy-btn { background: #3d4ee0; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 0.9rem; margin-top: 10px; }
+  .import-box { background: var(--surface-3, #1b1c23); border: 1px solid var(--border, #2a2c36); border-radius: 8px; padding: 16px; margin-top: 8px; }
+  .import-box textarea { width: 100%; min-height: 180px; box-sizing: border-box; background: var(--input-bg, #0f1014); color: var(--text-2, #cfd2dc); border: 1px solid var(--border-2, #34364280); border-radius: 6px; padding: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82rem; resize: vertical; }
+  .copy-btn { background: var(--accent-solid, #3d4ee0); color: #fff; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 0.9rem; margin-top: 10px; }
   .copy-btn.copied { background: #4fae6a; }
-  .app-version-footer { margin-top: 28px; padding-top: 12px; border-top: 1px solid #2a2c36; color: #6a6d79; font-size: 0.75rem; }
-  .app-version-footer a { color: #6a6d79; }
+  .app-version-footer { margin-top: 28px; padding-top: 12px; border-top: 1px solid var(--border, #2a2c36); color: var(--muted-3, #6a6d79); font-size: 0.75rem; }
+  .app-version-footer a { color: var(--muted-3, #6a6d79); }
 </style>
 </head>
 <body>

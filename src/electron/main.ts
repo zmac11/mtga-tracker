@@ -16,6 +16,7 @@ import { locateLogFile } from "../log/logLocator.js";
 import { extractArenaCards } from "../cards/extractArenaCards.js";
 import { enrichCards } from "../cards/scryfallEnrich.js";
 import { buildDeckViewerData } from "../deckViewerLoader.js";
+import { DEFAULT_PAGE_THEME, PAGE_THEMES, applyPageTheme, normalizePageTheme } from "../pageTheme.js";
 import { generateDeckViewerHtml } from "../deckViewerHtml.js";
 import { buildShareShellParts, generateDeckShareHtml, renderShareSectionHtml, type ShareDeckData } from "../deckShareHtml.js";
 import { buildArenaImportText, type ArenaExportCardInfo } from "../domain/arenaExport.js";
@@ -186,14 +187,22 @@ const SIZE_PRESETS: Record<string, { label: string; scale: number; width: number
 const DEFAULT_SIZE_PRESET = "medium";
 
 /**
- * 2026-10-02: overlay look. "default" is the original dark panel; "blue" is
- * the blue theme the menu button introduced, applied to the whole overlay.
- * Purely cosmetic - renderer-side CSS keyed off body[data-theme] (see
- * overlay.css); main.ts only persists the choice and pushes it.
+ * Overlay looks (2026-10-02; six more added 2026-10-03). "default" is the
+ * original dark panel and "blue" the blue theme the menu button introduced.
+ * The rest (ember, grove, gilded, neon, crest, retro) are fuller designs - gradient
+ * fills, framed borders, corner ornaments, their own fonts. Purely cosmetic -
+ * renderer-side CSS keyed off body[data-theme] (see overlay.css); main.ts only
+ * persists the choice and pushes it. Labels are what the Settings window shows.
  */
 const OVERLAY_THEMES: Record<string, { label: string }> = {
-  default: { label: "Default (dark)" },
-  blue: { label: "Blue (matches the menu button)" },
+  default: { label: "Dark (default)" },
+  blue: { label: "Blue" },
+  ember: { label: "Ember" },
+  grove: { label: "Grove" },
+  gilded: { label: "Gilded" },
+  neon: { label: "Neon" },
+  crest: { label: "Five Colors" },
+  retro: { label: "Retro" },
 };
 const DEFAULT_OVERLAY_THEME = "default";
 
@@ -251,6 +260,7 @@ interface OverlaySettings {
   theme: string; // a key of OVERLAY_THEMES - 2026-10-02
   opacity: number; // MIN_OPACITY..MAX_OPACITY
   cardSizePreset: string; // a key of CARD_SIZE_PRESETS - milestone 13
+  pageTheme: string; // look of the generated HTML pages: a key of PAGE_THEMES (pageTheme.ts) - 2026-10-03
   autoCheckForUpdates: boolean; // milestone 15 - defaults to true; see the Settings window's "Updates" section
   // Milestone 18: manual overrides for a player whose Player.log/card
   // database isn't where auto-detection guesses (logLocator.ts/
@@ -282,6 +292,7 @@ function loadOverlaySettings(): OverlaySettings {
       typeof parsed.opacity === "number" && parsed.opacity >= MIN_OPACITY && parsed.opacity <= MAX_OPACITY ? parsed.opacity : DEFAULT_OPACITY;
     const cardSizePreset =
       typeof parsed.cardSizePreset === "string" && parsed.cardSizePreset in CARD_SIZE_PRESETS ? parsed.cardSizePreset : DEFAULT_CARD_SIZE_PRESET;
+    const pageTheme = normalizePageTheme(parsed.pageTheme); // 2026-10-03: unknown/missing -> dark
     // Milestone 15: tolerant-default like every other field here - an
     // older settings file from before this field existed (or a future one
     // this build doesn't understand) just falls back to "on" rather than
@@ -292,7 +303,7 @@ function loadOverlaySettings(): OverlaySettings {
     // exactly "keep auto-detecting", not an error.
     const customLogPath = typeof parsed.customLogPath === "string" && parsed.customLogPath.length > 0 ? parsed.customLogPath : null;
     const customCardDbPath = typeof parsed.customCardDbPath === "string" && parsed.customCardDbPath.length > 0 ? parsed.customCardDbPath : null;
-    return { sizePreset, theme, opacity, cardSizePreset, autoCheckForUpdates, customLogPath, customCardDbPath };
+    return { sizePreset, theme, opacity, cardSizePreset, pageTheme, autoCheckForUpdates, customLogPath, customCardDbPath };
   } catch {
     // No settings saved yet, or the file's unreadable/corrupt - fall back to the original look.
     return {
@@ -300,6 +311,7 @@ function loadOverlaySettings(): OverlaySettings {
       theme: DEFAULT_OVERLAY_THEME,
       opacity: DEFAULT_OPACITY,
       cardSizePreset: DEFAULT_CARD_SIZE_PRESET,
+      pageTheme: DEFAULT_PAGE_THEME,
       autoCheckForUpdates: true,
       customLogPath: null,
       customCardDbPath: null,
@@ -378,6 +390,7 @@ let overlaySettings: OverlaySettings = {
   theme: DEFAULT_OVERLAY_THEME,
   opacity: DEFAULT_OPACITY,
   cardSizePreset: DEFAULT_CARD_SIZE_PRESET,
+  pageTheme: DEFAULT_PAGE_THEME,
   autoCheckForUpdates: true,
   customLogPath: null,
   customCardDbPath: null,
@@ -815,7 +828,7 @@ function openSettingsWindow(): void {
   }
   settingsWindow = new BrowserWindow({
     width: 340,
-    height: 660, // milestone 18: grew again to fit the new "Locations" section below Updates
+    height: Math.min(860, screen.getPrimaryDisplay().workAreaSize.height - 20), // milestone 18: grew to fit the "Locations" section; 2026-10-03: grew again for the extra themes and the page theme
     resizable: false,
     minimizable: false,
     maximizable: false,
@@ -1289,6 +1302,8 @@ app.whenReady().then(() => {
       presets: Object.entries(SIZE_PRESETS).map(([key, preset]) => ({ key, label: preset.label })),
       cardSizePreset: overlaySettings.cardSizePreset,
       cardSizePresets: Object.entries(CARD_SIZE_PRESETS).map(([key, preset]) => ({ key, label: preset.label })),
+      pageTheme: overlaySettings.pageTheme,
+      pageThemes: PAGE_THEMES,
       // Milestone 15: the Settings window's "Updates" section.
       autoCheckForUpdates: overlaySettings.autoCheckForUpdates,
       appVersion: app.getVersion(),
@@ -1405,6 +1420,18 @@ app.whenReady().then(() => {
     return { ok: true, sizePreset: overlaySettings.sizePreset, opacity: overlaySettings.opacity, cardSizePreset: overlaySettings.cardSizePreset };
   });
 
+  // 2026-10-03: look of the generated HTML pages. Like the card size, there is
+  // no open window to push it to - it is applied the next time a page is written
+  // (the live draft page rewrites itself on every draft event, so it follows soon after).
+  ipcMain.handle("set-page-theme", (_event, themeKey: unknown) => {
+    if (typeof themeKey !== "string" || !PAGE_THEMES.some((t) => t.key === themeKey)) {
+      return { ok: false, reason: "Unknown page theme." };
+    }
+    overlaySettings = { ...overlaySettings, pageTheme: themeKey };
+    saveOverlaySettings(overlaySettings);
+    return { ok: true, pageTheme: overlaySettings.pageTheme };
+  });
+
   ipcMain.handle("set-size-preset", (_event, presetKey: unknown) => {
     if (typeof presetKey !== "string" || !(presetKey in SIZE_PRESETS)) {
       return { ok: false, reason: "Unknown size preset." };
@@ -1502,10 +1529,10 @@ app.whenReady().then(() => {
       appVersion: app.getVersion(),
     };
     const shareFileName = `${baseName}.share.html`;
-    writeFileSync(join(outDir, shareFileName), generateDeckShareHtml(shareData), "utf8");
+    writeFileSync(join(outDir, shareFileName), applyPageTheme(generateDeckShareHtml(shareData), overlaySettings.pageTheme), "utf8");
 
     const html = generateDeckViewerHtml({ ...data, appVersion: app.getVersion(), shareFileName });
-    writeFileSync(outPath, html, "utf8");
+    writeFileSync(outPath, applyPageTheme(html, overlaySettings.pageTheme), "utf8");
     return { ok: true, outPath, fileName, shareFileName };
   }
 
@@ -1592,7 +1619,7 @@ app.whenReady().then(() => {
       const outDir = join(pipeline.dataDir, "deck-viewer");
       mkdirSync(outDir, { recursive: true });
       const outPath = join(outDir, "index.html");
-      writeFileSync(outPath, html, "utf8");
+      writeFileSync(outPath, applyPageTheme(html, overlaySettings.pageTheme), "utf8");
       shell.openPath(outPath);
     } catch (err) {
       console.error("Failed to generate/open past events page:", err);
@@ -1633,7 +1660,7 @@ app.whenReady().then(() => {
       const outDir = join(pipeline.dataDir, "opponents");
       mkdirSync(outDir, { recursive: true });
       const outPath = join(outDir, "opponent-history.html");
-      writeFileSync(outPath, html, "utf8");
+      writeFileSync(outPath, applyPageTheme(html, overlaySettings.pageTheme), "utf8");
       shell.openPath(outPath);
     } catch (err) {
       console.error("Failed to generate/open opponent history page:", err);
@@ -1679,7 +1706,7 @@ app.whenReady().then(() => {
       const outDir = join(pipeline.dataDir, "rewards");
       mkdirSync(outDir, { recursive: true });
       const outPath = join(outDir, "reward-history.html");
-      writeFileSync(outPath, html, "utf8");
+      writeFileSync(outPath, applyPageTheme(html, overlaySettings.pageTheme), "utf8");
       shell.openPath(outPath);
     } catch (err) {
       console.error("Failed to generate/open reward history page:", err);
@@ -1791,7 +1818,7 @@ app.whenReady().then(() => {
       const outDir = join(pipeline.dataDir, "stats");
       mkdirSync(outDir, { recursive: true });
       const outPath = join(outDir, "limited-stats.html");
-      writeFileSync(outPath, html, "utf8");
+      writeFileSync(outPath, applyPageTheme(html, overlaySettings.pageTheme), "utf8");
       shell.openPath(outPath);
     } catch (err) {
       console.error("Failed to generate/open limited stats page:", err);
@@ -1847,7 +1874,7 @@ app.whenReady().then(() => {
       const outDir = join(pipeline.dataDir, "stats");
       mkdirSync(outDir, { recursive: true });
       const outPath = join(outDir, "draft-pick-stats.html");
-      writeFileSync(outPath, html, "utf8");
+      writeFileSync(outPath, applyPageTheme(html, overlaySettings.pageTheme), "utf8");
       shell.openPath(outPath);
     } catch (err) {
       console.error("Failed to generate/open draft pick stats page:", err);
@@ -1970,7 +1997,7 @@ app.whenReady().then(() => {
       const outDir = join(pipeline.dataDir, "stats");
       mkdirSync(outDir, { recursive: true });
       const outPath = join(outDir, "card-situational-winrate.html");
-      writeFileSync(outPath, html, "utf8");
+      writeFileSync(outPath, applyPageTheme(html, overlaySettings.pageTheme), "utf8");
       shell.openPath(outPath);
     } catch (err) {
       console.error("Failed to generate/open card situational win rate page:", err);
@@ -2001,13 +2028,13 @@ app.whenReady().then(() => {
       mkdirSync(join(pipeline.dataDir, "draft-progress"), { recursive: true });
       const currentDraft = snap.currentDraft;
       if (!currentDraft) {
-        writeFileSync(draftProgressPath, generateNoDraftInProgressHtml(), "utf8");
+        writeFileSync(draftProgressPath, applyPageTheme(generateNoDraftInProgressHtml(), overlaySettings.pageTheme), "utf8");
         return;
       }
       const cardStore = new CardStore(join(pipeline.dataDir, "tracker.db"));
       try {
         const data = buildDraftProgressData(currentDraft, cardStore);
-        writeFileSync(draftProgressPath, generateDraftProgressHtml(data), "utf8");
+        writeFileSync(draftProgressPath, applyPageTheme(generateDraftProgressHtml(data), overlaySettings.pageTheme), "utf8");
       } finally {
         cardStore.close();
       }

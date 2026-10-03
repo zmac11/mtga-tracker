@@ -181,11 +181,11 @@ export const DEFAULT_CARD_IMAGE_WIDTH_PX = 130;
  * deckViewerHtml.test.ts, unchanged by this split).
  */
 export const VISUAL_TAB_CSS = `  .visual-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
-  .toggle-btn { background: #22232c; color: #e8e8ec; border: 1px solid #34364280; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.85rem; }
-  .toggle-btn.active { background: #3d4ee0; border-color: #3d4ee0; }
+  .toggle-btn { background: var(--surface-2, #22232c); color: var(--text, #e8e8ec); border: 1px solid var(--border-2, #34364280); padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.85rem; }
+  .toggle-btn.active { background: var(--accent-solid, #3d4ee0); border-color: var(--accent-solid, #3d4ee0); }
   .visual-columns { display: flex; gap: 20px; align-items: flex-start; overflow-x: auto; padding-bottom: 8px; }
   .visual-column { display: flex; flex-direction: column; flex: 0 0 auto; width: var(--card-img-width); }
-  .visual-column-header { text-align: center; font-size: 0.8rem; color: #8a8d99; padding-bottom: 4px; margin-bottom: 14px; border-bottom: 1px solid #2a2c36; }
+  .visual-column-header { text-align: center; font-size: 0.8rem; color: var(--muted, #8a8d99); padding-bottom: 4px; margin-bottom: 14px; border-bottom: 1px solid var(--border, #2a2c36); }
   /* Fanned/overlapping stack: every card after the first in a column pulls up
      over the previous card's bottom (via the negative --card-overlap margin),
      so only a sliver of each earlier card peeks out above the next one -
@@ -202,7 +202,7 @@ export const VISUAL_TAB_CSS = `  .visual-toolbar { display: flex; align-items: c
   .visual-card img { width: 100%; border-radius: 6px; display: block; box-shadow: 0 2px 6px rgba(0,0,0,0.5); }
   .visual-card.is-hovered img, .visual-card:focus img { box-shadow: 0 10px 24px rgba(0,0,0,0.65); }
   .visual-card.is-hovered .preview, .visual-card:focus .preview { display: block; }
-  .visual-card-placeholder { width: var(--card-img-width); aspect-ratio: 5 / 7; background: #22232c; border: 1px solid #34364280; border-radius: 6px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 6px; text-align: center; font-size: 0.7rem; }
+  .visual-card-placeholder { width: var(--card-img-width); aspect-ratio: 5 / 7; background: var(--surface-2, #22232c); border: 1px solid var(--border-2, #34364280); border-radius: 6px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 6px; text-align: center; font-size: 0.7rem; }
   /* "Separate creatures / spells": same layout either way (see the header
      comment) - this just opens a small gap at the one card immediately
      after the last creature in a column, instead of the usual overlap. */
@@ -636,16 +636,16 @@ export function generateDeckViewerHtml(data: DeckViewerData): string {
 <title>${escapeHtml(data.deckName ?? data.definitionLabel)} - MTGA Tracker</title>
 ${FAVICON_LINK_TAG}
 <style>
-  :root { color-scheme: dark; --card-img-width: ${cardImageWidthPx}px; --card-overlap: calc(var(--card-img-width) * -1.05); }
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #14151a; color: #e8e8ec; margin: 0; padding: 24px; }
+  :root { color-scheme: var(--cs, dark); --card-img-width: ${cardImageWidthPx}px; --card-overlap: calc(var(--card-img-width) * -1.05); }
+  body { font-family: var(--font, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); background: var(--bg, #14151a); color: var(--text, #e8e8ec); margin: 0; padding: 24px; }
   h1 { font-size: 1.4rem; margin: 0 0 4px; }
-  h2 { font-size: 1rem; margin: 0 0 8px; color: #cfd2dc; }
-  .muted { color: #8a8d99; font-weight: normal; font-size: 0.85em; }
-  .header { margin-bottom: 20px; border-bottom: 1px solid #2a2c36; padding-bottom: 12px; }
-  .header .meta { color: #b7bac6; font-size: 0.95rem; }
+  h2 { font-size: 1rem; margin: 0 0 8px; color: var(--text-2, #cfd2dc); }
+  .muted { color: var(--muted, #8a8d99); font-weight: normal; font-size: 0.85em; }
+  .header { margin-bottom: 20px; border-bottom: 1px solid var(--border, #2a2c36); padding-bottom: 12px; }
+  .header .meta { color: var(--text-3, #b7bac6); font-size: 0.95rem; }
   .tabs { margin: 16px 0; }
-  .tabs button, .tabs a.tab-btn { background: #22232c; color: #e8e8ec; border: 1px solid #34364280; padding: 6px 14px; border-radius: 6px; cursor: pointer; margin-right: 8px; font-size: 0.9rem; }
-  .tabs button.active { background: #3d4ee0; border-color: #3d4ee0; }
+  .tabs button, .tabs a.tab-btn { background: var(--surface-2, #22232c); color: var(--text, #e8e8ec); border: 1px solid var(--border-2, #34364280); padding: 6px 14px; border-radius: 6px; cursor: pointer; margin-right: 8px; font-size: 0.9rem; }
+  .tabs button.active { background: var(--accent-solid, #3d4ee0); border-color: var(--accent-solid, #3d4ee0); }
   .tabs a.tab-btn { text-decoration: none; display: inline-block; margin-left: 12px; }
   .view { display: none; }
   .view.active { display: block; }
@@ -653,36 +653,36 @@ ${FAVICON_LINK_TAG}
   .deck-column { flex: 1 1 320px; min-width: 280px; }
   .deck-type-group { margin-bottom: 14px; }
   .deck-type-group:last-child { margin-bottom: 0; }
-  .deck-type-group h3 { font-size: 0.78rem; margin: 0 0 4px; color: #9296a3; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
+  .deck-type-group h3 { font-size: 0.78rem; margin: 0 0 4px; color: var(--muted-2, #9296a3); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
   .card-list { list-style: none; margin: 0; padding: 0; }
   .card-row { position: relative; display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 4px; cursor: default; }
-  .card-row:hover, .card-row:focus { background: #22232c; outline: none; }
+  .card-row:hover, .card-row:focus { background: var(--surface-2, #22232c); outline: none; }
   .card-row:hover .preview, .card-row:focus .preview { display: block; }
-  .qty { color: #8a8d99; width: 2.2em; text-align: right; flex-shrink: 0; }
+  .qty { color: var(--muted, #8a8d99); width: 2.2em; text-align: right; flex-shrink: 0; }
   .name { flex: 1; }
   ${CARD_PREVIEW_CSS}
   .curve-chart { display: flex; align-items: flex-end; gap: 12px; height: 220px; margin: 16px 0; }
   .curve-bar-wrap { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; flex: 1; height: 100%; }
   .curve-bar { width: 100%; max-width: 48px; background: #4fa8e0; border-radius: 4px 4px 0 0; display: flex; flex-direction: column; justify-content: flex-end; min-height: 2px; }
   .curve-bar-creature { background: #4fae6a; border-radius: 4px 4px 0 0; width: 100%; }
-  .curve-count { margin-top: 4px; font-size: 0.8rem; color: #cfd2dc; }
-  .curve-label { font-size: 0.8rem; color: #8a8d99; }
+  .curve-count { margin-top: 4px; font-size: 0.8rem; color: var(--text-2, #cfd2dc); }
+  .curve-label { font-size: 0.8rem; color: var(--muted, #8a8d99); }
   .legend { margin-top: 8px; }
   .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; }
   .swatch-creature { background: #4fae6a; }
   .swatch-noncreature { background: #4fa8e0; }
   ${VISUAL_TAB_CSS}
   .draft-picks { display: flex; flex-direction: column; gap: 20px; }
-  .draft-pick { border-bottom: 1px solid #2a2c36; padding-bottom: 14px; }
+  .draft-pick { border-bottom: 1px solid var(--border, #2a2c36); padding-bottom: 14px; }
   .draft-card-list { display: flex; flex-wrap: wrap; gap: 2px 18px; }
   .draft-card-row { width: 220px; }
-  .draft-card-row.picked .name { color: #6fd57a; font-weight: 600; }
-  .picked-badge { color: #6fd57a; flex-shrink: 0; }
+  .draft-card-row.picked .name { color: var(--pos, #6fd57a); font-weight: 600; }
+  .picked-badge { color: var(--pos, #6fd57a); flex-shrink: 0; }
   .wheel-line { margin-top: 6px; }
   .versions-list { display: flex; flex-direction: column; gap: 28px; }
-  .version-block { border-bottom: 1px solid #2a2c36; padding-bottom: 20px; }
+  .version-block { border-bottom: 1px solid var(--border, #2a2c36); padding-bottom: 20px; }
   .version-block:last-child { border-bottom: none; padding-bottom: 0; }
-  .app-version-footer { margin-top: 28px; padding-top: 12px; border-top: 1px solid #2a2c36; color: #6a6d79; font-size: 0.75rem; }
+  .app-version-footer { margin-top: 28px; padding-top: 12px; border-top: 1px solid var(--border, #2a2c36); color: var(--muted-3, #6a6d79); font-size: 0.75rem; }
 </style>
 </head>
 <body>

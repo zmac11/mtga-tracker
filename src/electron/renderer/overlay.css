@@ -728,3 +728,423 @@ body[data-theme="blue"] .dl-tab.active {
 .search-row.rare .sr-name { color: #f0d27a; }
 .search-row.mythic .sr-name { color: #f0905a; }
 .search-row.uncommon .sr-name { color: #b8cfe0; }
+
+/* ==========================================================================
+   Themed looks (2026-10-03): ember, grove, gilded, neon, crest.
+
+   Unlike "default" and "blue" above (restyled selector by selector), these are
+   built on one set of --th-* variables: each theme block below only declares
+   its palette and a few decorations, and the shared rules right after read
+   them. overlay-renderer.js puts body.themed on for every theme except the
+   two older ones, which keeps these rules from touching them.
+
+   Two kinds of decoration, deliberately:
+   - big-area effects (glows, hatching, scanlines) are extra BACKGROUND layers
+     on the panel (--th-deco), so they sit behind the text and follow the
+     panel's own layout;
+   - thin lines and ornaments (frames, corner brackets, accent bars) are
+     ::before/::after at the panel's edges, where there is no content to cover.
+   Both pseudo-elements ignore the pointer, so clicks and drags behave exactly
+   as on the older themes.
+   ========================================================================== */
+
+body.themed {
+  font-family: var(--th-font, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+  --th-deco: linear-gradient(transparent, transparent);
+  --th-radius: 1rem;
+  --th-border-img: none;
+}
+
+/* The unlocked (draggable) state: every themed border turns white, as the
+   blue theme's does. */
+body.themed.interactive {
+  --th-border: #fff;
+  --th-border-img: linear-gradient(#fff, #fff);
+}
+
+body.themed .panel,
+body.themed .deck-list {
+  background:
+    var(--th-deco),
+    linear-gradient(155deg,
+      rgba(var(--th-rgb-hi), var(--panel-opacity, 0.72)),
+      rgba(var(--th-rgb), var(--panel-opacity, 0.72)));
+  border: 1.5px solid var(--th-border);
+  border-radius: var(--th-radius);
+  box-shadow: var(--th-shadow, 0 0 0.9rem var(--th-glow));
+}
+
+/* Anchor for the ornaments below (.deck-list is already positioned). */
+body.themed .panel {
+  position: relative;
+}
+
+body.themed .panel::before,
+body.themed .panel::after,
+body.themed .deck-list::before,
+body.themed .deck-list::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+}
+
+body.themed .player .name,
+body.themed .status,
+body.themed .turn,
+body.themed .vs,
+body.themed .event-record,
+body.themed .lib-count {
+  color: var(--th-dim);
+}
+
+body.themed .draft-progress,
+body.themed .db-head,
+body.themed .lib-head {
+  color: var(--th-accent);
+}
+
+body.themed .event-record,
+body.themed .draft-progress,
+body.themed .draft-board,
+body.themed .opp-section,
+body.themed .lib-foot {
+  border-top-color: var(--th-rule);
+}
+
+body.themed .menu-btn {
+  background: var(--th-btn-bg);
+  border-color: var(--th-btn-border);
+  box-shadow: 0 0 0.8rem var(--th-btn-glow);
+}
+
+body.themed .menu-btn:hover {
+  background: var(--th-btn-hover);
+  border-color: #fff;
+  box-shadow: 0 0 1.1rem var(--th-btn-glow);
+}
+
+body.themed .menu-panel {
+  background: rgba(var(--th-menu-rgb), 0.97);
+  border-color: var(--th-border);
+  border-radius: var(--th-radius);
+}
+
+body.themed .menu-item:hover:not(.disabled) {
+  background: var(--th-hover);
+}
+
+body.themed .menu-sep {
+  background: var(--th-rule);
+}
+
+body.themed .dl-tab.active {
+  background: var(--th-hover);
+  border-color: var(--th-accent);
+}
+
+body.themed .search-input:focus {
+  border-color: var(--th-accent);
+}
+
+/* ---- Ember: a forge. Warm charcoal with a glow rising from the bottom-left
+   corner and a hot accent bar along the top edge. ---- */
+body[data-theme="ember"] {
+  --th-rgb-hi: 58, 24, 14;
+  --th-rgb: 20, 11, 10;
+  --th-border: rgba(255, 150, 80, 0.85);
+  --th-glow: rgba(255, 110, 40, 0.42);
+  --th-dim: rgba(255, 222, 198, 0.74);
+  --th-accent: #ffb77f;
+  --th-rule: rgba(255, 170, 110, 0.2);
+  --th-hover: rgba(255, 130, 60, 0.3);
+  --th-menu-rgb: 30, 15, 11;
+  --th-btn-bg: rgba(120, 44, 18, 0.96);
+  --th-btn-border: rgba(255, 170, 110, 0.95);
+  --th-btn-glow: rgba(255, 120, 50, 0.6);
+  --th-btn-hover: rgba(176, 66, 26, 1);
+  --th-deco: radial-gradient(120% 75% at 0% 100%, rgba(255, 105, 40, 0.24), transparent 62%);
+}
+
+body[data-theme="ember"] .panel::before,
+body[data-theme="ember"] .deck-list::before {
+  top: 0;
+  left: 1.2rem;
+  right: 4.6rem;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #ffa23c, #ff4d2e 65%, transparent);
+}
+
+/* ---- Grove: deep forest. Fine diagonal hatching, soft light from the top
+   right, rounder corners and a thin inner frame. ---- */
+body[data-theme="grove"] {
+  --th-rgb-hi: 16, 46, 32;
+  --th-rgb: 9, 22, 16;
+  --th-border: rgba(120, 214, 150, 0.8);
+  --th-glow: rgba(70, 200, 120, 0.34);
+  --th-dim: rgba(205, 240, 214, 0.74);
+  --th-accent: #9be8b0;
+  --th-rule: rgba(140, 224, 166, 0.2);
+  --th-hover: rgba(80, 200, 120, 0.28);
+  --th-menu-rgb: 11, 28, 20;
+  --th-btn-bg: rgba(24, 84, 52, 0.96);
+  --th-btn-border: rgba(150, 232, 178, 0.95);
+  --th-btn-glow: rgba(80, 210, 130, 0.55);
+  --th-btn-hover: rgba(36, 120, 74, 1);
+  --th-radius: 1.4rem;
+  --th-deco:
+    repeating-linear-gradient(135deg, rgba(150, 235, 175, 0.05) 0 2px, transparent 2px 10px),
+    radial-gradient(90% 60% at 100% 0%, rgba(110, 220, 150, 0.16), transparent 65%);
+}
+
+body[data-theme="grove"] .panel::after,
+body[data-theme="grove"] .deck-list::after {
+  inset: 0.3rem;
+  border: 1px solid rgba(155, 232, 176, 0.3);
+  border-radius: 1.1rem;
+}
+
+/* ---- Gilded: black and gold with a serif face. A double frame (the border
+   plus a faint inner line) with bright brackets in each corner. ---- */
+body[data-theme="gilded"] {
+  --th-font: "Palatino", "Palatino Linotype", "Book Antiqua", "Times New Roman", serif;
+  --th-rgb-hi: 40, 31, 16;
+  --th-rgb: 16, 13, 9;
+  --th-border: rgba(224, 188, 102, 0.9);
+  --th-glow: rgba(224, 180, 80, 0.3);
+  --th-dim: rgba(244, 232, 200, 0.74);
+  --th-accent: #e8c872;
+  --th-rule: rgba(224, 188, 102, 0.24);
+  --th-hover: rgba(224, 180, 80, 0.24);
+  --th-menu-rgb: 22, 17, 10;
+  --th-btn-bg: rgba(86, 64, 22, 0.96);
+  --th-btn-border: rgba(236, 204, 124, 0.95);
+  --th-btn-glow: rgba(224, 180, 80, 0.5);
+  --th-btn-hover: rgba(128, 96, 32, 1);
+  --th-radius: 0.5rem;
+  --th-deco: radial-gradient(130% 90% at 50% 0%, rgba(232, 196, 110, 0.12), transparent 65%);
+}
+
+body[data-theme="gilded"] .panel::after,
+body[data-theme="gilded"] .deck-list::after {
+  inset: 0.35rem;
+  border: 1px solid rgba(224, 188, 102, 0.26);
+  border-radius: 0.25rem;
+  background:
+    linear-gradient(#e8c872, #e8c872) top left / 1.4rem 2px no-repeat,
+    linear-gradient(#e8c872, #e8c872) top left / 2px 1.4rem no-repeat,
+    linear-gradient(#e8c872, #e8c872) top right / 1.4rem 2px no-repeat,
+    linear-gradient(#e8c872, #e8c872) top right / 2px 1.4rem no-repeat,
+    linear-gradient(#e8c872, #e8c872) bottom left / 1.4rem 2px no-repeat,
+    linear-gradient(#e8c872, #e8c872) bottom left / 2px 1.4rem no-repeat,
+    linear-gradient(#e8c872, #e8c872) bottom right / 1.4rem 2px no-repeat,
+    linear-gradient(#e8c872, #e8c872) bottom right / 2px 1.4rem no-repeat;
+  background-origin: border-box; /* after the shorthand, which would reset it */
+}
+
+body[data-theme="gilded"] .player .life {
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+/* ---- Neon: night-city. Monospace, scanlines, a cyan glow that turns magenta
+   at the opposite corner, and bright cut-line accents on two corners. ---- */
+body[data-theme="neon"] {
+  --th-font: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --th-rgb-hi: 10, 20, 38;
+  --th-rgb: 7, 8, 18;
+  --th-border: rgba(0, 226, 255, 0.85);
+  --th-glow: rgba(0, 226, 255, 0.45);
+  --th-dim: rgba(190, 240, 255, 0.78);
+  --th-accent: #5ef0ff;
+  --th-rule: rgba(0, 226, 255, 0.22);
+  --th-hover: rgba(0, 226, 255, 0.22);
+  --th-menu-rgb: 8, 12, 26;
+  --th-btn-bg: rgba(8, 60, 78, 0.96);
+  --th-btn-border: rgba(94, 240, 255, 0.95);
+  --th-btn-glow: rgba(0, 226, 255, 0.65);
+  --th-btn-hover: rgba(12, 96, 122, 1);
+  --th-radius: 0.35rem;
+  --th-shadow: 0 0 0.9rem rgba(0, 226, 255, 0.45), inset 0 0 1.4rem rgba(255, 40, 170, 0.1);
+  --th-deco:
+    repeating-linear-gradient(0deg, rgba(120, 255, 255, 0.045) 0 1px, transparent 1px 3px),
+    radial-gradient(80% 60% at 0% 0%, rgba(0, 226, 255, 0.14), transparent 60%),
+    radial-gradient(80% 60% at 100% 100%, rgba(255, 40, 170, 0.15), transparent 60%);
+}
+
+body[data-theme="neon"] .panel::after,
+body[data-theme="neon"] .deck-list::after {
+  inset: -1.5px;
+  border-radius: inherit;
+  background:
+    linear-gradient(#00e2ff, #00e2ff) top left / 3.4rem 2px no-repeat,
+    linear-gradient(#ff2aa8, #ff2aa8) bottom right / 3.4rem 2px no-repeat;
+}
+
+body[data-theme="neon"] .status,
+body[data-theme="neon"] .turn,
+body[data-theme="neon"] .vs,
+body[data-theme="neon"] .player .name,
+body[data-theme="neon"] .event-record,
+body[data-theme="neon"] .draft-progress {
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* ---- Five Colors: a border that runs through all five Magic colors, a
+   five-segment color bar along the top, on a cool slate panel. ---- */
+body[data-theme="crest"] {
+  --th-rgb-hi: 30, 34, 46;
+  --th-rgb: 14, 16, 24;
+  --th-border: transparent; /* the colored border is drawn by ::before below */
+  --th-border-img: linear-gradient(110deg, #f4efd6, #7db8ef 25%, #a99bb0 50%, #ef8d73 75%, #86c796);
+  --th-glow: rgba(190, 200, 230, 0.22);
+  --th-dim: rgba(214, 222, 240, 0.74);
+  --th-accent: #d4dcf0;
+  --th-rule: rgba(190, 200, 230, 0.2);
+  --th-hover: rgba(160, 175, 220, 0.26);
+  --th-menu-rgb: 18, 20, 30;
+  --th-btn-bg: rgba(44, 50, 74, 0.96);
+  --th-btn-border: rgba(214, 222, 240, 0.9);
+  --th-btn-glow: rgba(160, 175, 220, 0.5);
+  --th-btn-hover: rgba(70, 80, 118, 1);
+  --th-deco: radial-gradient(70% 50% at 50% 0%, rgba(255, 255, 255, 0.07), transparent 70%);
+}
+
+/* The gradient border: a gradient-filled box masked down to just its 1.5px
+   padding ring (the mask composites the content box out of the full box). */
+body[data-theme="crest"] .panel::before,
+body[data-theme="crest"] .deck-list::before {
+  inset: -1.5px;
+  padding: 1.5px;
+  border-radius: inherit;
+  background: var(--th-border-img);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+
+body[data-theme="crest"] .panel::after,
+body[data-theme="crest"] .deck-list::after {
+  top: 0.45rem;
+  left: 1.2rem;
+  right: 4.6rem;
+  height: 0.28rem;
+  border-radius: 0.2rem;
+  background: linear-gradient(90deg,
+    #f4efd6 0 20%, #7db8ef 20% 40%, #a99bb0 40% 60%, #ef8d73 60% 80%, #86c796 80%);
+}
+
+/* ---- Retro: a 1980s DOS file-manager screen. Flat blue, light-gray text, a
+   double-line frame with its title cut into the top edge, bright 16-color
+   green/red life totals, and a cyan selection bar on hover. No glows. ---- */
+body[data-theme="retro"] {
+  --th-font: "Lucida Console", Menlo, Consolas, "Courier New", monospace;
+  --th-rgb-hi: 0, 0, 176;
+  --th-rgb: 0, 0, 160;
+  --th-border: #b8b8b8;
+  --th-glow: transparent;
+  --th-shadow: none;
+  --th-dim: #b8b8b8;
+  --th-accent: #55ffff;
+  --th-rule: rgba(184, 184, 184, 0.6);
+  --th-hover: #00aaaa;
+  --th-menu-rgb: 0, 0, 150;
+  --th-radius: 0;
+  /* A faint checkerboard, like the dithered shading of text-mode screens. */
+  --th-deco: conic-gradient(rgba(255, 255, 255, 0.04) 25%, transparent 0 50%,
+    rgba(255, 255, 255, 0.04) 0 75%, transparent 0) 0 0 / 4px 4px;
+}
+
+body[data-theme="retro"] .panel,
+body[data-theme="retro"] .deck-list {
+  border: 4px double var(--th-border);
+}
+
+/* The frame's title, set into the top edge: solid blue behind the text so the
+   double line breaks around it. */
+body[data-theme="retro"] .panel::before,
+body[data-theme="retro"] .deck-list::before {
+  top: -0.85rem;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0 0.6rem;
+  font-size: 1rem;
+  font-weight: bold;
+  letter-spacing: 0.08em;
+  line-height: 1.3rem;
+  white-space: nowrap;
+  color: #ffff55;
+  background: rgb(0, 0, 168);
+}
+
+body[data-theme="retro"] .panel::before {
+  content: "MTGA TRACKER";
+}
+
+body[data-theme="retro"] .deck-list::before {
+  content: "DECK LIST";
+}
+
+/* The deck-list column clips its contents (overflow: hidden), which would also
+   clip the title sitting on its top edge; its rows scroll on their own. */
+body[data-theme="retro"] .deck-list {
+  overflow: visible;
+}
+
+/* The open menu covers the panel and would leave the panel's title poking out above it. */
+body[data-theme="retro"].menu-open .panel::before {
+  visibility: hidden;
+}
+
+body[data-theme="retro"] .player.me .life {
+  color: #55ff55;
+}
+
+body[data-theme="retro"] .player.opp .life {
+  color: #ff5555;
+}
+
+body[data-theme="retro"] .outcome {
+  border-radius: 0;
+}
+
+body[data-theme="retro"] .event-record,
+body[data-theme="retro"] .draft-progress {
+  border-top: 3px double var(--th-rule);
+}
+
+/* The menu button as a gray 3D push button. */
+body[data-theme="retro"] .menu-btn {
+  color: #000;
+  background: #b8b8b8;
+  border: 2px solid;
+  border-color: #fff #555 #555 #fff;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+body[data-theme="retro"] .menu-btn:hover {
+  background: #ffff55;
+  border-color: #fff #555 #555 #fff;
+  box-shadow: none;
+}
+
+/* Menu entries and tabs: the classic cyan selection bar, black text. */
+body[data-theme="retro"] .menu-item,
+body[data-theme="retro"] .dl-tab,
+body[data-theme="retro"] .search-input,
+body[data-theme="retro"] .search-auto {
+  border-radius: 0;
+}
+
+body[data-theme="retro"] .menu-item:hover:not(.disabled),
+body[data-theme="retro"] .menu-item:hover:not(.disabled) .hint {
+  color: #000;
+}
+
+body[data-theme="retro"] .dl-tab.active {
+  color: #000;
+  background: var(--th-hover);
+  border-color: var(--th-hover);
+}

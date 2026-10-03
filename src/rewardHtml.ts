@@ -41,28 +41,28 @@ export function generateRewardHtml(rows: EventRewardRow[], overall: OverallRewar
 <title>Reward History - MTGA Tracker</title>
 ${FAVICON_LINK_TAG}
 <style>
-  :root { color-scheme: dark; }
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #14151a; color: #e8e8ec; margin: 0; padding: 24px; }
+  :root { color-scheme: var(--cs, dark); }
+  body { font-family: var(--font, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); background: var(--bg, #14151a); color: var(--text, #e8e8ec); margin: 0; padding: 24px; }
   h1 { font-size: 1.4rem; margin: 0 0 4px; }
   h2 { font-size: 1.1rem; margin: 28px 0 10px; }
-  .muted { color: #8a8d99; }
+  .muted { color: var(--muted, #8a8d99); }
   p.hint { margin: 0 0 20px; }
-  .filters { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; background: #1c1e26; border: 1px solid #2a2c36; border-radius: 8px; padding: 14px 16px; margin-bottom: 16px; }
+  .filters { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; background: var(--surface, #1c1e26); border: 1px solid var(--border, #2a2c36); border-radius: 8px; padding: 14px 16px; margin-bottom: 16px; }
   .filter-group { display: flex; flex-direction: column; gap: 6px; }
-  .filter-group label.group-label { font-size: 0.75rem; color: #8a8d99; text-transform: uppercase; letter-spacing: 0.03em; }
-  input[type="text"], select { background: #14151a; color: #e8e8ec; border: 1px solid #2a2c36; border-radius: 6px; padding: 6px 8px; font-size: 0.9rem; min-width: 180px; }
+  .filter-group label.group-label { font-size: 0.75rem; color: var(--muted, #8a8d99); text-transform: uppercase; letter-spacing: 0.03em; }
+  input[type="text"], select { background: var(--bg, #14151a); color: var(--text, #e8e8ec); border: 1px solid var(--border, #2a2c36); border-radius: 6px; padding: 6px 8px; font-size: 0.9rem; min-width: 180px; }
   table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
-  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid #22242e; }
-  th { color: #8a8d99; font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.02em; }
-  tfoot td { font-weight: 600; border-top: 1px solid #2a2c36; border-bottom: none; }
-  .gem { color: #7fd6e8; }
-  .gold { color: #e8c76a; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border-faint, #22242e); }
+  th { color: var(--muted, #8a8d99); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.02em; }
+  tfoot td { font-weight: 600; border-top: 1px solid var(--border, #2a2c36); border-bottom: none; }
+  .gem { color: var(--gem, #7fd6e8); }
+  .gold { color: var(--gold, #e8c76a); }
   .empty-note { padding: 20px 0; }
   .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 8px; }
-  .summary-card { background: #1c1e26; border: 1px solid #2a2c36; border-radius: 8px; padding: 12px 14px; }
-  .summary-card .label { font-size: 0.75rem; color: #8a8d99; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 6px; }
+  .summary-card { background: var(--surface, #1c1e26); border: 1px solid var(--border, #2a2c36); border-radius: 8px; padding: 12px 14px; }
+  .summary-card .label { font-size: 0.75rem; color: var(--muted, #8a8d99); text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 6px; }
   .summary-card .value { font-size: 1.1rem; }
-  .summary-card .sub { font-size: 0.78rem; color: #8a8d99; margin-top: 2px; }
+  .summary-card .sub { font-size: 0.78rem; color: var(--muted, #8a8d99); margin-top: 2px; }
   .context-note { margin: 4px 0 20px; }
 </style>
 </head>
