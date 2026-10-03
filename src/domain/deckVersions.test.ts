@@ -114,6 +114,16 @@ function run() {
   );
   assert.equal(sameSideboardToo.length, 1);
 
+  // --- Real timestamp shape (M/D/YYYY h:mm:ss AM/PM, plus the ": Match t" suffix older match rows carry): ---
+  // raw string order puts "10:..." before "1:..." and "10/..." before "9/...", so attribution must
+  // go through compareTs. Edit at 1:29 PM sits between match 1 (1:11 PM) and match 2 (1:30 PM).
+  const real = deriveDeckVersions(
+    [deck("d1", [{ cardId: 1, quantity: 23 }], "10/2/2026 1:05:33 PM"), deck("d1", [{ cardId: 2, quantity: 23 }], "10/2/2026 1:29:52 PM")],
+    [match("m1", "10/2/2026 1:11:26 PM: Match t"), match("m2", "10/2/2026 1:30:16 PM: Match t"), match("m3", "10/2/2026 10:12:00 PM: Match t")],
+  );
+  assert.equal(real.length, 2);
+  assert.deepEqual(real.map((v) => v.matches.map((m) => m.matchId)), [["m1"], ["m2", "m3"]]);
+
   console.log("OK: deriveDeckVersions collapses identical-content resubmissions (order-independent across both mainDeck and, since milestone 18, sideboard), drops any version with zero attributed matches, attributes matches by ts window (falling back to the first version for a match earlier than every submission), numbers versions by submission time regardless of input array order, and treats a sideboard-only change as its own version.");
 }
 

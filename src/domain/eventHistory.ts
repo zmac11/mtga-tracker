@@ -2,7 +2,7 @@ import type { DraftPackSeen, DraftPickMade, DeckSubmitted, DraftCompleted, Match
 import { computeMatchOutcomes, latestStandingByEvent, reconcileWinRate, winRate, winRateFromCounts, type MatchOutcome, type WinRate } from "./rollups.js";
 import { parseEventIdentity, resolveEventFormat, type EventIdentity, type EventFormat } from "./eventIdentity.js";
 import { deriveDeckVersions, type DeckVersion } from "./deckVersions.js";
-import { buildCourseWindows, assignCourseId, compareTs, type CourseWindow } from "./courseRuns.js";
+import { buildCourseWindows, assignCourseId, compareTs, DECK_SUBMIT_LEAD_MS, type CourseWindow } from "./courseRuns.js";
 
 /**
  * Per-event-run history layer (milestone 7 phase 2): for one specific dated
@@ -232,7 +232,8 @@ export function buildEventRunHistory(eventId: string, source: EventHistorySource
   // submission for this run is now kept (decksForRun) so deriveDeckVersions
   // can see the full history; "the current deck" is still just the latest
   // one, by ts, for every other field below that expects a single deck.
-  const decksForRun = source.decks.filter((d) => d.eventName === eventId && matchesCourseWindow(d.ts));
+  const matchesDeckWindow = (ts: string): boolean => !disambiguating || assignCourseId(ts, windows, DECK_SUBMIT_LEAD_MS) === courseId;
+  const decksForRun = source.decks.filter((d) => d.eventName === eventId && matchesDeckWindow(d.ts));
   const deckSubmission = decksForRun.length > 0 ? [...decksForRun].sort((a, b) => compareTs(a.ts, b.ts)).at(-1)! : null;
 
   // DraftPickMade/DraftPackSeen are linked by draftId, not eventId directly

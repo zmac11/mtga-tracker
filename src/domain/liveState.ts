@@ -10,7 +10,7 @@ import type {
   MatchFound,
 } from "./types.js";
 import { computeMatchOutcomes, reconcileWinRate, rollupByEvent, winRate, type GameOutcome, type WinRate } from "./rollups.js";
-import { buildCourseWindows, assignCourseId, compareTs, type CourseWindow } from "./courseRuns.js";
+import { buildCourseWindows, assignCourseId, compareTs, DECK_SUBMIT_LEAD_MS, type CourseWindow } from "./courseRuns.js";
 
 function dedupeLatestByKey<T>(items: T[], keyFn: (item: T) => string): T[] {
   const map = new Map<string, T>();
@@ -423,7 +423,7 @@ export class LiveStateTracker {
       // source currently knows more.
       const reconciled = reconcileWinRate(localRate, standing);
       const deck =
-        [...this.deckSubmissions].reverse().find((d) => d.eventName === eventId && (!disambiguating || assignCourseId(d.ts, windows) === currentCourseId)) ?? null;
+        [...this.deckSubmissions].reverse().find((d) => d.eventName === eventId && (!disambiguating || assignCourseId(d.ts, windows, DECK_SUBMIT_LEAD_MS) === currentCourseId)) ?? null;
       eventRecord = {
         ...reconciled,
         eventId,

@@ -1,6 +1,6 @@
 import type { EventHistorySource, EventRunRef } from "./eventHistory.js";
 import { listEventRuns, courseWindowsForEvent } from "./eventHistory.js";
-import { assignCourseId, compareTs } from "./courseRuns.js";
+import { assignCourseId, compareTs, DECK_SUBMIT_LEAD_MS } from "./courseRuns.js";
 import { parseEventIdentity, type EventFormat, type EventIdentity } from "./eventIdentity.js";
 import { computeRunStatuses, runStatusKey } from "./runStatus.js";
 
@@ -57,7 +57,7 @@ function resolveRunSignals(ref: EventRunRef, source: EventHistorySource, isFinis
   const matchesCourseWindow = (ts: string): boolean => !disambiguating || assignCourseId(ts, windows) === courseId;
 
   const joinsForRun = source.joins.filter((j) => j.eventName === eventId && matchesCourseWindow(j.ts));
-  const decksForRun = source.decks.filter((d) => d.eventName === eventId && matchesCourseWindow(d.ts));
+  const decksForRun = source.decks.filter((d) => d.eventName === eventId && (!disambiguating || assignCourseId(d.ts, windows, DECK_SUBMIT_LEAD_MS) === courseId));
   const matchesForRun = source.matchFounds.filter((m) => m.eventId === eventId && matchesCourseWindow(m.ts));
   const standingsForRun = source.courseStandings.filter((s) => s.eventId === eventId && matchesCourseId(s));
   const rewardsForRun = source.rewards.filter((r) => r.eventId === eventId && matchesCourseId(r));

@@ -122,7 +122,7 @@ export function deriveDeckVersions(submissions: DeckSubmitted[], matches: MatchO
     // first version (see the doc comment above).
     let active = versions[0];
     for (const v of versions) {
-      if (v.submittedAt <= match.ts) active = v;
+      if (compareTs(v.submittedAt, match.ts) <= 0) active = v;
       else break;
     }
     active.matches.push(match);

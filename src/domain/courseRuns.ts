@@ -108,11 +108,27 @@ export function buildCourseWindows(signals: Array<{ courseId: string; ts: string
  * practice - a match/deck submission always follows the run it belongs to
  * actually starting - but this returns null rather than guessing wrong).
  */
-export function assignCourseId(ts: string, windows: CourseWindow[]): string | null {
+export function assignCourseId(ts: string, windows: CourseWindow[], leadMs: number = 0): string | null {
   let result: string | null = null;
+  const at = tsMillis(ts);
   for (const w of windows) {
-    if (compareTs(w.startTs, ts) <= 0) result = w.courseId;
+    const start = tsMillis(w.startTs);
+    // `leadMs` lets a ts that falls just BEFORE a window's recorded start still count as inside
+    // it - see DECK_SUBMIT_LEAD_MS. Falls back to plain compareTs when either ts can't be parsed.
+    const started = leadMs > 0 && !Number.isNaN(at) && !Number.isNaN(start) ? start - leadMs <= at : compareTs(w.startTs, ts) <= 0;
+    if (started) result = w.courseId;
     else break;
   }
   return result;
 }
+
+/**
+ * How early (ms) before a run's first recorded signal its first DeckSubmitted may land and still
+ * belong to that run. A run's window starts at its first CourseStanding / card pool / ..., but
+ * Arena sends the run's initial deck (EventSetDeckV3) about a second BEFORE that first standing -
+ * checked against the real data: every Sealed run's first submission is 1s ahead of its window
+ * start. Without this lead the initial deck was attributed to the PREVIOUS run, so a run whose
+ * deck was edited later showed one version only (and the previous run showed the wrong deck).
+ * Deck submissions pass this to assignCourseId; matches and the other kinds never need it.
+ */
+export const DECK_SUBMIT_LEAD_MS = 60_000;
